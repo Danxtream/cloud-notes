@@ -64,18 +64,37 @@ struct NotesView: View {
     @StateObject var model = NotesModel()
     @State var importing = false
     @State var showDrawing = false
+    @State var creatingFolder = false
+    @State var newFolderName = ""
     var body: some View {
         VStack(spacing: 0) {
         NavigationSplitView {
             VStack(spacing: 0) {
             List(selection: $model.folder) {
                 Label("All notes", systemImage: "doc.text").tag("all")
-                Section("Folders") {
+                Section {
                     OutlineGroup(model.folders.tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
+                } header: {
+                    HStack {
+                        Text("Folders")
+                        Spacer()
+                        Button { newFolderName = ""; creatingFolder = true } label: { Image(systemName: "plus") }
+                            .buttonStyle(.borderless).disabled(model.busy || model.account.isEmpty)
+                            .help("New folder").accessibilityLabel("New folder")
+                    }
                 }
                 Label("Trash", systemImage: "trash").tag("trash")
             }
             .navigationTitle("Samsung Cloud Notes")
+            .alert("New folder", isPresented: $creatingFolder) {
+                TextField("Name", text: $newFolderName)
+                Button("Create") { let name = newFolderName; Task { await model.createFolder(named: name) } }
+                    .disabled(newFolderName.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                let parent = model.newFolderParent
+                Text(parent == "root" ? "At the top level of your Samsung Notes folders." : "Inside \(model.folders.path(of: parent)).")
+            }
             Divider()
                 VStack(alignment: .leading, spacing: 6) {
                     if !model.account.isEmpty {

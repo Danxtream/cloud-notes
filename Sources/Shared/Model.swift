@@ -165,6 +165,20 @@ import Combine
             if notes.isEmpty { self.error = error.localizedDescription }
         }
     }
+    /// Where a new folder goes: inside the selected folder, or at the top level when All notes, Trash or a built-in folder is selected.
+    var newFolderParent: String { folders.contains { $0.id == folder } && !folder.contains(":///") ? folder : "root" }
+    /// Creates a folder in Samsung Cloud, refreshes the library and selects the new folder.
+    func createFolder(named name: String) async {
+        guard let client, !busy else { return }
+        busy = true; status = "Creating folder…"
+        do {
+            let created = try await client.createFolder(named: name, in: newFolderParent)
+            busy = false
+            await refresh()
+            folder = created.id
+            status = "Created folder \(created.name)"
+        } catch { busy = false; self.error = error.localizedDescription; status = "The folder was not created." }
+    }
     private func describe(_ index: Int, document: CloudDocument) { notes[index].describe(document) }
     func select(_ id: String?) async {
         preserveDraft()

@@ -21,6 +21,13 @@ enum SelfTest {
                       FolderRecord(id: "c", name: "Loop", parent: "d"), FolderRecord(id: "d", name: "Back", parent: "c"), FolderRecord(id: "e", name: "Orphan", parent: "gone")]
         guard nested.tree.map(\.id) == ["a", "c", "d", "e"], nested.tree[0].children?.map(\.id) == ["b"], nested.tree[1].children == nil,
               nested.path(of: "b") == "Dev/Repos", nested.path(of: "e") == "Orphan" else { throw NotesError.message("Folder tree mismatch.") }
+        let newFolder = try XMLDocument(data: CloudClient.newFolderXML(id: "f1", name: "Plans & <ideas> 📒", parent: "a", order: 3, latestSync: 42, now: 7), options: [.nodeLoadExternalEntitiesNever])
+        guard let resource = newFolder.rootElement(), resource.name == "FolderResource", resource.value("syncModifiedTime") == "42",
+              let node = resource.first("nodeList")?.first("node"), node.attr("id") == "f1", node.attr("type") == "folder",
+              node.value("parentFolderNodeId") == "a", decodedCloudName(node.value("name")) == "Plans & <ideas> 📒", node.value("state") == "normal",
+              node.value("order") == "3", node.value("color") == "-1", node.value("createdTime") == "7", node.value("syncModifiedTime") == "7" else { throw NotesError.message("New folder request mismatch.") }
+        guard try XMLDocument(data: CloudClient.newFolderXML(id: "f2", name: "Later", parent: "root", order: 0, latestSync: 42, now: 99), options: [.nodeLoadExternalEntitiesNever])
+              .rootElement()?.value("syncModifiedTime") == "99" else { throw NotesError.message("New folder request time mismatch.") }
         let inkFixture = Data(base64Encoded:"/////wQAAACgDwAADQAAAAAADQAAAAEIAEoAAAABAEIAAAABAAEMAgAAAAAAAAAkQAAAAAAAADRAAAAAAAAAPkAAAAAAAABEQAAAAD8AAEA/AAAAAAoAAAACAFY0Ev8AAEBA")!
         let ink = try InkStroke(inkFixture)
         guard ink.points.count == 2, ink.points[1] == CGPoint(x: 30, y: 40), ink.color == 0xff123456 else { throw NotesError.message("Drawing coordinates or color mismatch.") }

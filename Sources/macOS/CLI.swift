@@ -20,13 +20,14 @@ enum CommandLineTool {
       sync                           Download changed notes into the local cache
       list [--folder NAME|PATH] [--trash] [--limit N]
                                      List notes, newest first
-      folders                        List folders with their paths (Parent/Child)
+      folders [--xml]                List folders with their paths (Parent/Child), or Samsung's raw folder tree
       search QUERY                   Search titles and full typed text
       show NOTE [--xml]              Print a note's title and text (or original XML)
 
     Changes
       edit NOTE [--title TEXT] [--body TEXT | --body-file PATH|-] [--discard-draft]
                                      Replace title and/or typed text, then save to Samsung Cloud
+      mkdir PATH                     Create a folder in Samsung Cloud, e.g. "Dev/New ideas"
       export NOTE DIRECTORY          Write NOTE.samsungnote (original XML, text, attachments)
       drawing NOTE OUTPUT.pdf        Write the approximate handwriting preview
 
@@ -106,7 +107,12 @@ enum CommandLineTool {
             print("\(library.index.notes.filter { !$0.trashed }.count) notes, \(library.index.folders.count) folders · downloaded \(library.downloaded) changed or missing documents.")
         case "list": try arguments(0, "[--folder NAME] [--trash]"); try await list(options)
         case "folders":
-            try arguments(0, "")
+            try arguments(0, "[--xml]")
+            if options.flags.contains("xml") {
+                if options.offline { throw Failure(message: "folders --xml reads Samsung Cloud; run it without --offline.", code: 2) }
+                print(String(decoding: try await CloudClient(account: try SessionStore.load()).folderTreeXML(), as: UTF8.self))
+                return
+            }
             let library = try await Library.load(offline: options.offline)
             let folders = library.index.folders
             if options.json { try printJSON(folders.map { ["id": $0.id, "name": $0.name, "parent": $0.parent, "path": folders.path(of: $0.id)] }) }
@@ -114,6 +120,7 @@ enum CommandLineTool {
         case "search": try arguments(1, "QUERY"); try await search(options.positional[0], options)
         case "show": try arguments(1, "NOTE [--xml]"); try await show(options.positional[0], options)
         case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-]"); try await edit(options.positional[0], options)
+        case "mkdir": try arguments(1, "PATH"); try await mkdir(options.positional[0], options)
         case "export": try arguments(2, "NOTE DIRECTORY"); try await export(options.positional[0], to: options.positional[1], options)
         case "drawing": try arguments(2, "NOTE OUTPUT.pdf"); try await drawing(options.positional[0], to: options.positional[1], options)
         case "login":
@@ -249,6 +256,19 @@ enum CommandLineTool {
             notes = Array(notes.prefix(count))
         }
         try output(notes, library: library, options)
+    }
+
+    /// Creates the last folder in PATH inside the folder the rest of PATH names (top level for a bare name).
+    @MainActor static func mkdir(_ path: String, _ options: Options) async throws {
+        if options.offline { throw Failure(message: "mkdir writes to Samsung Cloud; run it without --offline.", code: 2) }
+        var parts = path.split(separator: "/", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+        let name = parts.removeLast()
+        let library = try await Library.load(offline: false, strict: true)
+        let parent = parts.isEmpty ? "root" : try library.folder(parts.joined(separator: "/")).id
+        let created = try await library.client.createFolder(named: name, in: parent)
+        let folders = library.index.folders + [created]
+        if options.json { try printJSON(["id": created.id, "name": created.name, "parent": created.parent, "path": folders.path(of: created.id)]) }
+        else { print("Created \(folders.path(of: created.id))\t\(created.id)") }
     }
 
     @MainActor static func search(_ query: String, _ options: Options) async throws {

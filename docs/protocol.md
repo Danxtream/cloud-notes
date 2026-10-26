@@ -63,6 +63,32 @@ The tested upload returned HTTP 201 and a `DefaultView` with resource/revision/t
 
 No delete operation was used. Existing personal notes were not edited by the validation scripts; all writes targeted the separate test note.
 
+## Folder write
+
+Folder changes use `PATCH /samsungnotes/v1/folder` with `Content-Type: application/xml;Charset=utf-8` and a `FolderResource` that lists only the changed nodes. Samsung Notes 4.4.45 for Android uses the same request; no Samsung code is bundled.
+
+```xml
+<FolderResource>
+  <syncModifiedTime>newest time in the account's tree, including this node</syncModifiedTime>
+  <nodeList>
+    <node id="new lowercase UUID" type="folder">
+      <parentFolderNodeId>root, or the parent folder's id</parentFolderNodeId>
+      <syncModifiedTime>current time, ms</syncModifiedTime>
+      <createdTime>ms</createdTime><lastModifiedTime>ms</lastModifiedTime>
+      <name>Base64 UTF-8 name</name><state>normal</state><trashedTime>0</trashedTime>
+      <color>-1</color><order>number of existing siblings</order>
+      <requestTime>ms</requestTime><requestDevice>{"model":"…","ver":"…"}</requestDevice>
+    </node>
+  </nodeList>
+</FolderResource>
+```
+
+Samsung stores the node's `syncModifiedTime` as sent, and other devices download only nodes newer than their own change point. A first test that sent Samsung Notes' local default (1464416139847) produced a folder that full listings returned but the phone never received; stamping the node with the current time fixed it, and the phone then showed the folder. The app's local default is replaced before upload.
+
+Samsung Notes treats 409 as a conflict, 403 with error 128409 as a client clock ahead of the server, and 500 with 128900 as an account that requires encrypted folder names. The client creates folders only: it reads the tree first (parent, duplicate names, sibling count, newest time) and reads it again afterwards to confirm the folder exists. Renaming, moving, trashing and note membership use the same node shape but are not implemented.
+
+"Math notes" (`math:///`) and "Screen off memo" (`screenOffMemo:///`) are built-in folders that Samsung Notes creates itself; the client does not create subfolders in them.
+
 ## Remaining interoperability work
 
 - Samsung may change its private authentication and document APIs; native sign-in and renewal are described in [authentication](authentication.md).

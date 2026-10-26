@@ -319,6 +319,61 @@ final class CloudClient {
         }
         return CloudIndex(notes: notes.values.sorted { $0.modified > $1.modified }, folders: folders.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
     }
+    /// The `FolderResource` body Samsung Notes sends to create one folder with `PATCH /folder`, as observed in
+    /// Samsung Notes 4.4.45 for Android. Samsung stores the node's `syncModifiedTime` as sent and other devices
+    /// only download nodes newer than their last change point, so the node is stamped with the current time and
+    /// the resource with the newest time in the tree. The colour is Samsung's default (-1) and `order` places
+    /// the folder after its siblings.
+    static func newFolderXML(id: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64) -> Data {
+        func escaped(_ value: String) -> String {
+            value.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+        }
+        let device = (try? JSONSerialization.data(withJSONObject: ["model": ClientPlatform.model, "ver": appShortVersion], options: [.sortedKeys]))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let node = "<node id=\"\(escaped(id))\" type=\"folder\"><parentFolderNodeId>\(escaped(parent))</parentFolderNodeId>"
+            + "<syncModifiedTime>\(now)</syncModifiedTime><createdTime>\(now)</createdTime><lastModifiedTime>\(now)</lastModifiedTime>"
+            + "<name>\(Data(name.utf8).base64EncodedString())</name><state>normal</state><trashedTime>0</trashedTime><color>-1</color>"
+            + "<order>\(order)</order><requestTime>\(now)</requestTime><requestDevice>\(escaped(device))</requestDevice></node>"
+        return Data("<?xml version=\"1.0\" encoding=\"UTF-8\"?><FolderResource><syncModifiedTime>\(max(latestSync, now))</syncModifiedTime><nodeList>\(node)</nodeList></FolderResource>".utf8)
+    }
+    /// The account's whole folder tree (folder and note nodes) exactly as Samsung returns it.
+    func folderTreeXML() async throws -> Data {
+        var components = URLComponents(); components.queryItems = [URLQueryItem(name: "lastChangePoint", value: Self.initialCursor("FOLDER"))]
+        return try await request("/samsungnotes/v1/folder/changes?" + components.percentEncodedQuery!)
+    }
+    /// Creates a folder under `parent` ("root" for the top level) the way Samsung Notes does, then reads the
+    /// tree back to confirm Samsung stored it. Built-in folders such as Math notes cannot hold subfolders.
+    func createFolder(named rawName: String, in parent: String) async throws -> FolderRecord {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 100, !name.contains("/"),
+              !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else {
+            throw NotesError.message("Folder names need 1 to 100 characters and no \"/\".")
+        }
+        guard !parent.contains(":///") else { throw NotesError.message("Built-in folders cannot contain subfolders.") }
+        func nodes() async throws -> [(id: String, type: String, parent: String, state: String, name: String, synced: Int64)] {
+            let xml = try XMLDocument(data: try await folderTreeXML(), options: [.nodeLoadExternalEntitiesNever])
+            return (xml.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? []).map {
+                (id: $0.attr("id"), type: $0.attr("type"), parent: $0.value("parentFolderNodeId"), state: $0.value("state"),
+                 name: decodedCloudName($0.value("name")), synced: Int64($0.value("syncModifiedTime")) ?? 0)
+            }
+        }
+        let tree = try await nodes()
+        let folders = tree.filter { $0.type == "folder" && $0.state == "normal" }
+        if parent != "root", !folders.contains(where: { $0.id == parent }) { throw NotesError.message("The parent folder no longer exists. Refresh and try again.") }
+        let siblings = folders.filter { $0.parent == parent }
+        if siblings.contains(where: { $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            throw NotesError.message("A folder named \"\(name)\" already exists there.")
+        }
+        let id = UUID().uuidString.lowercased()
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let body = Self.newFolderXML(id: id, name: name, parent: parent, order: siblings.count, latestSync: tree.map(\.synced).max() ?? 0, now: now)
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
+        guard try await nodes().contains(where: { $0.id == id && $0.state == "normal" && $0.name == name }) else {
+            throw NotesError.message("Samsung accepted the request, but the new folder did not appear. Refresh before trying again.")
+        }
+        return FolderRecord(id: id, name: name, parent: parent)
+    }
     func download(_ id: String) async throws -> CloudDocument {
         guard id.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else { throw NotesError.message("Invalid note identifier.") }
         let data = try await request("/samsungnotes/v1/notes/\(id)/compareForDownsync", method: "POST", body: Data("<note ver=\"1\"/>".utf8), contentType: "application/xml")
