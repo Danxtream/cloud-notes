@@ -18,9 +18,9 @@ enum CommandLineTool {
     Library
       status                         Account, cache and version information
       sync                           Download changed notes into the local cache
-      list [--folder NAME] [--trash] [--limit N]
+      list [--folder NAME|PATH] [--trash] [--limit N]
                                      List notes, newest first
-      folders                        List folders
+      folders                        List folders with their paths (Parent/Child)
       search QUERY                   Search titles and full typed text
       show NOTE [--xml]              Print a note's title and text (or original XML)
 
@@ -108,8 +108,9 @@ enum CommandLineTool {
         case "folders":
             try arguments(0, "")
             let library = try await Library.load(offline: options.offline)
-            if options.json { try printJSON(library.index.folders.map { ["id": $0.id, "name": $0.name, "parent": $0.parent] }) }
-            else { for folder in library.index.folders { print("\(folder.id)\t\(folder.name)") } }
+            let folders = library.index.folders
+            if options.json { try printJSON(folders.map { ["id": $0.id, "name": $0.name, "parent": $0.parent, "path": folders.path(of: $0.id)] }) }
+            else { for folder in folders.sorted(by: { folders.path(of: $0.id).localizedStandardCompare(folders.path(of: $1.id)) == .orderedAscending }) { print("\(folder.id)\t\(folders.path(of: folder.id))") } }
         case "search": try arguments(1, "QUERY"); try await search(options.positional[0], options)
         case "show": try arguments(1, "NOTE [--xml]"); try await show(options.positional[0], options)
         case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-]"); try await edit(options.positional[0], options)
@@ -181,6 +182,16 @@ enum CommandLineTool {
             if failures > 0 { fputs("scnotes: \(failures) notes could not be downloaded.\n", stderr) }
         }
         func folderName(_ id: String) -> String { index.folders.first { $0.id == id }?.name ?? "" }
+        func folderPath(_ id: String) -> String { index.folders.path(of: id) }
+        /// A folder by ID, path ("Dev/Repos") or name. A name shared by several folders must be given as a path.
+        func folder(_ query: String) throws -> FolderRecord {
+            let folders = index.folders
+            if let exact = folders.first(where: { $0.id == query || folders.path(of: $0.id).compare(query, options: .caseInsensitive) == .orderedSame }) { return exact }
+            let named = folders.filter { $0.name.compare(query, options: .caseInsensitive) == .orderedSame }
+            if named.count == 1 { return named[0] }
+            if named.count > 1 { throw Failure(message: "\"\(query)\" matches \(named.count) folders; use a path:\n" + named.map { "  " + folders.path(of: $0.id) }.joined(separator: "\n")) }
+            throw Failure(message: "No folder named \"\(query)\". Run scnotes folders.")
+        }
         func resolve(_ query: String) throws -> NoteRecord {
             let notes = index.notes
             if let exact = notes.first(where: { $0.id == query }) { return exact }
@@ -230,8 +241,7 @@ enum CommandLineTool {
         let library = try await Library.load(offline: options.offline)
         var notes = library.index.notes.filter { options.flags.contains("trash") ? $0.trashed : !$0.trashed }
         if let folder = options.value("folder") {
-            let matches = library.index.folders.filter { $0.id == folder || $0.name.compare(folder, options: .caseInsensitive) == .orderedSame }
-            guard let target = matches.first else { throw Failure(message: "No folder named \"\(folder)\". Run scnotes folders.") }
+            let target = try library.folder(folder)
             notes = notes.filter { $0.folder == target.id }
         }
         if let limit = options.value("limit") {
@@ -256,14 +266,14 @@ enum CommandLineTool {
         let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd HH:mm"
         for note in notes {
             let date = formatter.string(from: Date(timeIntervalSince1970: note.modified / 1000))
-            let folder = library.folderName(note.folder)
+            let folder = library.folderPath(note.folder)
             print("\(note.id)\t\(date)\t\(note.locked || note.encrypted ? "🔒 " : "")\(note.title)\(folder.isEmpty ? "" : "\t[\(folder)]")")
         }
         if notes.isEmpty && !options.json { fputs("No notes.\n", stderr) }
     }
 
     @MainActor static func describe(_ note: NoteRecord, library: Library) -> [String: Any] {
-        ["id": note.id, "title": note.title, "snippet": note.snippet, "folderId": note.folder, "folder": library.folderName(note.folder),
+        ["id": note.id, "title": note.title, "snippet": note.snippet, "folderId": note.folder, "folder": library.folderName(note.folder), "folderPath": library.folderPath(note.folder),
          "modified": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: note.modified / 1000)),
          "revision": note.commit, "trashed": note.trashed, "locked": note.locked || note.encrypted]
     }

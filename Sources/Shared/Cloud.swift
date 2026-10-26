@@ -97,6 +97,39 @@ struct NoteRecord: Identifiable, Codable {
     var trashed: Bool = false
 }
 struct FolderRecord: Identifiable, Codable { var id: String; var name: String; var parent: String }
+/// A folder and its subfolders for outline views. `children` is nil for a leaf, so no disclosure arrow is shown.
+struct FolderNode: Identifiable { var folder: FolderRecord; var children: [FolderNode]?; var id: String { folder.id } }
+extension Array where Element == FolderRecord {
+    /// Top-level folders with subfolders nested under their parents, in the array's order.
+    /// Folders whose parent is missing (for example trashed) or whose parent chain loops are shown at the top level.
+    var tree: [FolderNode] {
+        let byID = Dictionary(map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        func parentKey(_ folder: FolderRecord) -> String {
+            var seen: Set<String> = [folder.id], current = folder.parent
+            while let next = byID[current] {
+                if !seen.insert(current).inserted { return "" }
+                current = next.parent
+            }
+            return byID[folder.parent] == nil ? "" : folder.parent
+        }
+        let byParent = Dictionary(grouping: self, by: parentKey)
+        func nodes(_ parent: String) -> [FolderNode] {
+            (byParent[parent] ?? []).map { folder in
+                let children = nodes(folder.id)
+                return FolderNode(folder: folder, children: children.isEmpty ? nil : children)
+            }
+        }
+        return nodes("")
+    }
+    /// The folder's names from the top level down, joined with "/", for example "Dev/Repos".
+    func path(of id: String) -> String {
+        var names: [String] = [], current = id, seen: Set<String> = []
+        while let folder = first(where: { $0.id == current }), seen.insert(current).inserted {
+            names.insert(folder.name, at: 0); current = folder.parent
+        }
+        return names.joined(separator: "/")
+    }
+}
 struct CloudIndex: Codable { var notes: [NoteRecord]; var folders: [FolderRecord] }
 func decodedCloudName(_ value: String) -> String {
     guard let data = Data(base64Encoded: value), let decoded = String(data: data, encoding: .utf8),

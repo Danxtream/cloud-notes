@@ -71,7 +71,7 @@ struct NotesView: View {
             List(selection: $model.folder) {
                 Label("All notes", systemImage: "doc.text").tag("all")
                 Section("Folders") {
-                    ForEach(model.folders) { folder in Label(folder.name, systemImage: "folder").tag(folder.id) }
+                    OutlineGroup(model.folders.tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
                 }
                 Label("Trash", systemImage: "trash").tag("trash")
             }

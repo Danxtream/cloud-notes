@@ -27,8 +27,8 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | --- | --- |
 | `scnotes status` | Account, connection type, cache size, last sync, data directory |
 | `scnotes sync` | Refresh the index and download changed or missing documents |
-| `scnotes list [--folder NAME] [--trash] [--limit N]` | Notes, newest first: ID, date, title, folder |
-| `scnotes folders` | Folder IDs and names |
+| `scnotes list [--folder NAME\|PATH] [--trash] [--limit N]` | Notes, newest first: ID, date, title, folder path |
+| `scnotes folders` | Folder IDs and paths; subfolders appear as `Parent/Child` |
 | `scnotes search QUERY` | Case-insensitive search of titles and full typed text |
 | `scnotes show NOTE [--xml]` | Title, text, attachment names and drawing page count; `--xml` prints the original cloud document |
 | `scnotes edit NOTE [--title TEXT] [--body TEXT \| --body-file PATH\|-]` | Replace the title and/or typed text and save to Samsung Cloud |

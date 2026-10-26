@@ -17,7 +17,11 @@ enum SelfTest {
         let cases = ["", "hello", "café — 日本語 🚀", "first\nsecond\n", "<&> \"quotes\""]
         for value in cases { guard try StyledText.decode(StyledText.encode(value)) == value else { throw NotesError.message("Text round-trip mismatch.") } }
         guard decodedCloudName(Data("Math notes\u{200b}".utf8).base64EncodedString()) == "Math notes", decodedCloudName(Data("Math notes 📒".utf8).base64EncodedString()) == "Math notes 📒", decodedCloudName("My notes") == "My notes" else { throw NotesError.message("Folder name decoding failed.") }
-        let inkFixture = Data(base64Encoded: "/////wQAAACgDwAADQAAAAAADQAAAAEIAEoAAAABAEIAAAABAAEMAgAAAAAAAAAkQAAAAAAAADRAAAAAAAAAPkAAAAAAAABEQAAAAD8AAEA/AAAAAAoAAAACAFY0Ev8AAEBA")!
+        let nested = [FolderRecord(id: "a", name: "Dev", parent: "root"), FolderRecord(id: "b", name: "Repos", parent: "a"),
+                      FolderRecord(id: "c", name: "Loop", parent: "d"), FolderRecord(id: "d", name: "Back", parent: "c"), FolderRecord(id: "e", name: "Orphan", parent: "gone")]
+        guard nested.tree.map(\.id) == ["a", "c", "d", "e"], nested.tree[0].children?.map(\.id) == ["b"], nested.tree[1].children == nil,
+              nested.path(of: "b") == "Dev/Repos", nested.path(of: "e") == "Orphan" else { throw NotesError.message("Folder tree mismatch.") }
+        let inkFixture = Data(base64Encoded:"/////wQAAACgDwAADQAAAAAADQAAAAEIAEoAAAABAEIAAAABAAEMAgAAAAAAAAAkQAAAAAAAADRAAAAAAAAAPkAAAAAAAABEQAAAAD8AAEA/AAAAAAoAAAACAFY0Ev8AAEBA")!
         let ink = try InkStroke(inkFixture)
         guard ink.points.count == 2, ink.points[1] == CGPoint(x: 30, y: 40), ink.color == 0xff123456 else { throw NotesError.message("Drawing coordinates or color mismatch.") }
         do { _ = try InkStroke(inkFixture.prefix(25)); throw NotesError.message("Truncated drawing was accepted.") }
