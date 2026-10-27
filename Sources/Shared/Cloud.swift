@@ -599,9 +599,11 @@ final class CloudClient {
         guard let value = try XMLDocument(data: data, options: [.nodeLoadExternalEntitiesNever]).rootElement()?.attr("commitId"), !value.isEmpty else { throw NotesError.message("Samsung omitted the current revision.") }
         return value
     }
+    /// Why a save was refused because the note has a newer revision in Samsung Cloud.
+    static let changedElsewhere = "This note changed on another device. Your draft is saved locally; reload the cloud copy before saving again."
     func save(_ document: CloudDocument, title: String, body: String) async throws -> CloudDocument {
         let remoteCommit = try await currentCommit(document.serverID)
-        guard remoteCommit == document.commit else { throw NotesError.message("This note changed on another device. Your draft is saved locally; reload the cloud copy before saving again.") }
+        guard remoteCommit == document.commit else { throw NotesError.message(Self.changedElsewhere) }
         try LocalStore.backup(document)
         let xml = try document.uploadXML(title: title, body: body)
         let boundary = "SamsungNotesMac-" + UUID().uuidString
@@ -652,6 +654,13 @@ enum LocalStore {
         let url = root.appendingPathComponent("NoteTemplate.xml")
         try document.original.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+    /// Appends a failed cloud save (time, note id, reason; never note text) to SaveFailures.log for diagnosis.
+    static func logSaveFailure(id: String, reason: String) {
+        let line = "\(ISO8601DateFormatter().string(from: Date()))\t\(id)\t\(reason.replacingOccurrences(of: "\n", with: " "))\n"
+        let url = root.appendingPathComponent("SaveFailures.log")
+        if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close() }
+        else { try? Data(line.utf8).write(to: url, options: [.atomic]); try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
     }
     static func writeDraft(id: String, title: String, body: String, commit: String) throws {
         let data = try JSONSerialization.data(withJSONObject: ["title": title, "body": body, "commit": commit])

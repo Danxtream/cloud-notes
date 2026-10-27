@@ -17,6 +17,18 @@ import Combine
     @Published var busy = false
     @Published var draftConflict = false
     @Published var error: String?
+    /// Cloud saves under way; autosave uploads in the background, so editing never waits for them.
+    @Published var savesInFlight = 0
+    /// Why the last save failed, shown next to Retry; nil after a successful save.
+    @Published var saveError: String?
+    @Published var lastSaved: Date?
+    private var autosaveTask: Task<Void, Never>?
+    /// An edit goes to Samsung Cloud one second after typing pauses, and at least every ten seconds during continuous
+    /// typing. Uploads run in the background and text typed meanwhile is queued, so the editor never waits.
+    static let autosaveDelay: UInt64 = 1_000_000_000
+    static let autosaveMaxWait: TimeInterval = 10
+    /// When the oldest edit not yet sent to Samsung Cloud was made.
+    private var unsavedSince: Date?
     @Published var account = ""
     @Published var document: CloudDocument?
     @Published var pendingConnection: Data?
@@ -215,7 +227,13 @@ import Combine
     }
     private func describe(_ index: Int, document: CloudDocument) { notes[index].describe(document) }
     func select(_ id: String?) async {
+        autosaveTask?.cancel()
         preserveDraft()
+        // Save the note being left in the background so the next one opens at once.
+        if let document, dirty, !draftConflict {
+            let title = self.title, body = self.body
+            Task { await upload(document, title: title, body: body) }
+        }
         if let id { await open(id) } else { document = nil }
     }
     func open(_ id: String, force: Bool = false) async {
@@ -240,7 +258,7 @@ import Combine
                let draftTitle = values["title"], let draftBody = values["body"], (draftBody != doc.body || draftTitle != doc.title) {
                 title = draftTitle; body = draftBody
                 draftConflict = values["commit"] != doc.commit
-                status = draftConflict ? "Draft is based on an older revision. Reload to archive it and use the cloud copy." : "Recovered an unsaved local draft. Save when ready."
+                status = draftConflict ? "Draft is based on an older revision. Reload to archive it and use the cloud copy." : "Recovered unsaved changes; saving them to Samsung Cloud."
             }
         } catch {
             guard generation == taskGeneration, selection == id else { return }
@@ -256,11 +274,59 @@ import Combine
         draftTask?.cancel()
         draftTask = Task { try? await Task.sleep(nanoseconds: 600_000_000); if !Task.isCancelled { preserveDraft() } }
     }
+    /// Called for every change to the title or text: keeps a local draft at once and saves to Samsung Cloud after a pause.
+    func edited() { scheduleDraft(); scheduleAutosave() }
+    func scheduleAutosave() {
+        autosaveTask?.cancel()
+        guard dirty, editable else { unsavedSince = nil; return }
+        let since = unsavedSince ?? Date(); unsavedSince = since
+        let wait = Date().timeIntervalSince(since) >= Self.autosaveMaxWait ? 0 : Self.autosaveDelay
+        autosaveTask = Task { [weak self] in
+            if wait > 0 { try? await Task.sleep(nanoseconds: wait) }
+            guard !Task.isCancelled else { return }
+            // The upload gets its own task: this timer is cancelled by the next keystroke (and by save itself), and
+            // cancelling a task aborts its network requests ("cancelled").
+            Task { await self?.save() }
+        }
+    }
+    /// One line on where the open note stands: saving, saved, not saved, or changes waiting for the next autosave.
+    var saveStatus: String {
+        if draftConflict { return "Not saved: changed on another device" }
+        if savesInFlight > 0 { return "Saving…" }
+        if let saveError { return "Not saved: " + saveError }
+        if dirty { return "Unsaved changes" }
+        return lastSaved.map { "Saved \($0.formatted(date: .omitted, time: .shortened))" } ?? "Saved"
+    }
+    /// Saves the open note now (autosave, Retry). While another operation runs it tries again after the usual pause.
     func save() async {
-        guard let client, let document, !busy, dirty, !draftConflict else { return }
-        preserveDraft(); busy = true; status = "Saving to Samsung Cloud…"
-        let id = document.serverID; let savedTitle = title; let savedBody = body
-        defer { busy = false }
+        guard let document, dirty, !draftConflict else { return }
+        if busy { scheduleAutosave(); return }
+        autosaveTask?.cancel(); unsavedSince = nil
+        preserveDraft()
+        await upload(document, title: title, body: body)
+    }
+    /// Saves `title` and `body` of `document`, one upload per note at a time: a second upload from the same revision
+    /// would be refused as a conflict, so text that arrives during an upload is queued and sent from the fresh revision.
+    private func upload(_ document: CloudDocument, title: String, body: String) async {
+        let id = document.serverID
+        guard !uploading.contains(id) else { queued[id] = (title, body); return }
+        uploading.insert(id); defer { uploading.remove(id) }
+        var base = document, nextTitle = title, nextBody = body
+        while let fresh = await uploadOnce(base, title: nextTitle, body: nextBody), let next = queued.removeValue(forKey: id),
+              next.title != fresh.title || next.body != fresh.body {
+            base = fresh; nextTitle = next.title; nextBody = next.body
+        }
+        queued[id] = nil
+    }
+    private var uploading: Set<String> = []
+    private var queued: [String: (title: String, body: String)] = [:]
+    /// One verified save. Typing that happened meanwhile is kept and saved next; a note changed on another device stops
+    /// autosave and keeps the local draft. Returns the saved document, or nil when the save failed.
+    private func uploadOnce(_ document: CloudDocument, title savedTitle: String, body savedBody: String) async -> CloudDocument? {
+        guard let client else { return nil }
+        let id = document.serverID
+        savesInFlight += 1; saveError = nil
+        defer { savesInFlight -= 1 }
         do {
             // Use a fresh object so a failed upload cannot mutate the displayed baseline.
             let copy = try CloudDocument(serverID: id, data: document.original)
@@ -271,11 +337,24 @@ import Combine
                 try cache?.save(fresh, revision: fresh.commit)
             }
             try LocalStore.writeDraft(id: id, title: savedTitle, body: savedBody, commit: fresh.commit)
-            if selection == id { self.document = fresh; title = fresh.title; body = fresh.body }
+            if selection == id { self.document = fresh }
             if let i = notes.firstIndex(where: { $0.id == id }) { describe(i, document: fresh) }
             try cache?.saveIndex(CloudIndex(notes: notes, folders: folders))
+            lastSaved = Date()
             status = "Saved to Samsung Cloud · \(Date().formatted(date: .omitted, time: .shortened))"
-        } catch { self.error = error.localizedDescription; status = "Save failed. Your local draft is retained." }
+            if selection == id { scheduleAutosave() }
+            return fresh
+        } catch {
+            LocalStore.logSaveFailure(id: id, reason: error.localizedDescription)
+            if error.localizedDescription == CloudClient.changedElsewhere {
+                if selection == id { draftConflict = true }
+                status = "Not saved: \(savedTitle.isEmpty ? "this note" : savedTitle) changed on another device. Your text is kept as a local draft."
+            } else {
+                saveError = error.localizedDescription
+                status = "Not saved: " + error.localizedDescription
+            }
+            return nil
+        }
     }
     func attachmentData(_ asset: AssetRecord, document: CloudDocument) async throws -> Data {
         if let data = cache?.asset(id: asset.id, revision: document.commit) { return data }

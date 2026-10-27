@@ -196,7 +196,8 @@ struct NotesView: View {
                     if model.draftConflict { Text("This local draft is based on an older cloud revision. Reload the note to archive the draft and open the current cloud copy.").font(.caption).foregroundStyle(.orange).padding(10) }
                     Divider()
                     HStack {
-                        Text(model.dirty ? "Local draft" : "Cloud copy").foregroundStyle(model.dirty ? .orange : .secondary)
+                        Text(model.saveStatus).foregroundStyle(model.saveError != nil || model.draftConflict ? .orange : .secondary).lineLimit(1)
+                        if model.saveError != nil { Button("Retry") { Task { await model.save() } }.controlSize(.small) }
                         Spacer()
                         Text("Plain text editing · drawings and attachments retained").foregroundStyle(.secondary)
                     }.font(.caption).padding(10)
@@ -218,11 +219,10 @@ struct NotesView: View {
             Button { Task { if let id = model.selection { model.preserveDraft(); await model.open(id, force: true) } } } label: { Label("Reload note", systemImage: "arrow.down.doc") }.disabled(model.busy || model.document == nil)
             Button { Task { await model.export() } } label: { Label("Export", systemImage: "square.and.arrow.up") }.disabled(model.busy || model.document == nil)
             Button { do { _ = try LocalStore.directory("Backups"); NSWorkspace.shared.open(LocalStore.root) } catch { model.error = error.localizedDescription } } label: { Label("Local copies", systemImage: "folder") }
-            Button { Task { await model.save() } } label: { Label("Save to cloud", systemImage: "icloud.and.arrow.up") }.disabled(model.busy || !model.dirty || !model.editable).keyboardShortcut("s")
         }
         Divider()
         HStack(spacing: 8) {
-            if model.busy { ProgressView().controlSize(.small).frame(width: 14, height: 14) }
+            if model.busy || model.savesInFlight > 0 { ProgressView().controlSize(.small).frame(width: 14, height: 14) }
             Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 0)
         }.padding(.horizontal, 12).frame(height: 32).background(.bar)
@@ -247,8 +247,8 @@ struct NotesView: View {
         }
         .alert("Samsung Cloud Notes", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
         .onChange(of: model.selection) { value in Task { await model.select(value) } }
-        .onChange(of: model.title) { _ in model.scheduleDraft() }
-        .onChange(of: model.body) { _ in model.scheduleDraft() }
+        .onChange(of: model.title) { _ in model.edited() }
+        .onChange(of: model.body) { _ in model.edited() }
         .onChange(of: model.document?.serverID) { _ in showDrawing = model.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !(model.document?.drawingPages.isEmpty ?? true) }
         .onChange(of: model.folder) { _ in model.preserveDraft(); model.selection = model.visibleNotes.first?.id }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.preserveDraft() }
