@@ -30,6 +30,8 @@ enum CommandLineTool {
       new TITLE [--folder PATH] [--body TEXT | --body-file PATH|-]
                                      Create a text note in Samsung Cloud from the template
       template NOTE                  Copy new notes' structure from NOTE instead of the automatic choice
+      favorite NOTE / unfavorite NOTE
+                                     Star or unstar a note (Favorites in Samsung Notes)
       trash NOTE                     Move a note to the Trash (Samsung Notes empties it after 30 days)
       restore NOTE                   Bring a note back from the Trash to its folder
       delete NOTE                    Delete a note that is in the Trash for good
@@ -128,6 +130,7 @@ enum CommandLineTool {
         case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-]"); try await edit(options.positional[0], options)
         case "mkdir": try arguments(1, "PATH"); try await mkdir(options.positional[0], options)
         case "trash", "restore", "delete": try arguments(1, "NOTE"); try await change(command, options.positional[0], options)
+        case "favorite", "unfavorite": try arguments(1, "NOTE"); try await star(command == "favorite", options.positional[0], options)
         case "new": try arguments(1, "TITLE [--folder PATH] [--body TEXT | --body-file PATH|-]"); try await new(options.positional[0], options)
         case "template":
             try arguments(1, "NOTE")
@@ -273,6 +276,21 @@ enum CommandLineTool {
         try output(notes, library: library, options)
     }
 
+    /// Stars (favorite) or unstars (unfavorite) the note NOTE names, keeping its title and text.
+    @MainActor static func star(_ on: Bool, _ query: String, _ options: Options) async throws {
+        if options.offline { throw Failure(message: "\(on ? "favorite" : "unfavorite") writes to Samsung Cloud; run it without --offline.", code: 2) }
+        let library = try await Library.load(offline: false, strict: true)
+        let note = try library.resolve(query)
+        guard !note.trashed else { throw Failure(message: "Restore the note from the Trash first.") }
+        let document = try await library.client.download(note.id)
+        let title = note.title.isEmpty ? note.id : note.title
+        guard document.isFavorite != on else { print("\"\(title)\" is \(on ? "already" : "not") in Favorites."); return }
+        if let issue = editIssue(document) { throw Failure(message: issue) }
+        let fresh = try await library.client.save(document, title: document.title, body: document.body, favorite: on)
+        try library.cache.save(fresh, revision: fresh.commit)
+        print(on ? "Added \"\(title)\" to Favorites." : "Removed \"\(title)\" from Favorites.")
+    }
+
     /// trash, restore or delete (for good, Trash only) the note NOTE names.
     @MainActor static func change(_ command: String, _ query: String, _ options: Options) async throws {
         if options.offline { throw Failure(message: "\(command) writes to Samsung Cloud; run it without --offline.", code: 2) }
@@ -351,7 +369,7 @@ enum CommandLineTool {
     @MainActor static func describe(_ note: NoteRecord, library: Library) -> [String: Any] {
         ["id": note.id, "title": note.title, "snippet": note.snippet, "folderId": note.folder, "folder": library.folderName(note.folder), "folderPath": library.folderPath(note.folder),
          "modified": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: note.modified / 1000)),
-         "revision": note.commit, "trashed": note.trashed, "locked": note.locked || note.encrypted,
+         "revision": note.commit, "trashed": note.trashed, "locked": note.locked || note.encrypted, "favorite": note.isFavorite,
          "daysLeftInTrash": note.daysLeftInTrash().map { $0 as Any } ?? NSNull()]
     }
 

@@ -97,6 +97,10 @@ struct NoteRecord: Identifiable, Codable {
     var snippet: String = ""
     var folder: String = ""
     var trashed: Bool = false
+    /// Whether the note is starred (from its document; nil until the document has been read). Optional, so cached
+    /// libraries written before this field still decode.
+    var favorite: Bool? = nil
+    var isFavorite: Bool { favorite == true }
     /// When the note was moved to the Trash (milliseconds), from its tree node.
     var trashedTime: Double? = nil
     /// Days until Samsung Notes deletes a trashed note for good: it empties its Trash after 30 days.
@@ -195,8 +199,12 @@ final class CloudDocument {
         }
         drawingPages = (resource.first("pageList")?.elements(forName: "page") ?? []).enumerated().compactMap { index, page in DrawingPage(page, index: index) }
     }
-    func uploadXML(title newTitle: String, body newBody: String, now: Date = Date()) throws -> Data {
+    /// Whether the note is starred; Samsung Notes keeps this on the note itself (`attributes/@isFavorite`).
+    var isFavorite: Bool { resource.first("attributes")?.attr("isFavorite").lowercased() == "true" }
+    /// The note to upload with a new title and text, and with its star changed when `favorite` is given.
+    func uploadXML(title newTitle: String, body newBody: String, favorite: Bool? = nil, now: Date = Date()) throws -> Data {
         if let textIssue { throw NotesError.message(textIssue) }
+        if let favorite { resource.first("attributes")?.set("isFavorite", favorite ? "true" : "false") }
         if resource.attr("isEncrypted") == "true" || resource.attr("isLocked") == "true" {
             throw NotesError.message("Locked or encrypted notes cannot be edited by this version.")
         }
@@ -601,17 +609,18 @@ final class CloudClient {
     }
     /// Why a save was refused because the note has a newer revision in Samsung Cloud.
     static let changedElsewhere = "This note changed on another device. Your draft is saved locally; reload the cloud copy before saving again."
-    func save(_ document: CloudDocument, title: String, body: String) async throws -> CloudDocument {
+    /// Saves a new title and text (and, when `favorite` is given, the note's star), then reads the note back to verify.
+    func save(_ document: CloudDocument, title: String, body: String, favorite: Bool? = nil) async throws -> CloudDocument {
         let remoteCommit = try await currentCommit(document.serverID)
         guard remoteCommit == document.commit else { throw NotesError.message(Self.changedElsewhere) }
         try LocalStore.backup(document)
-        let xml = try document.uploadXML(title: title, body: body)
+        let xml = try document.uploadXML(title: title, body: body, favorite: favorite)
         let boundary = "SamsungNotesMac-" + UUID().uuidString
         var payload = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"noteResource\"\r\nContent-Type: application/xml\r\n\r\n".utf8)
         payload.append(xml); payload.append(Data("\r\n--\(boundary)--\r\n".utf8))
         _ = try await request("/samsungnotes/v1/notes/\(document.serverID)/update", method: "POST", body: payload, contentType: "multipart/form-data; boundary=\(boundary)")
         let fresh = try await download(document.serverID)
-        guard fresh.body == body, fresh.title == title else { throw NotesError.message("Samsung accepted the upload, but its readback differs from the draft. The local draft and backup are retained.") }
+        guard fresh.body == body, fresh.title == title, favorite.map({ fresh.isFavorite == $0 }) ?? true else { throw NotesError.message("Samsung accepted the upload, but its readback differs from the draft. The local draft and backup are retained.") }
         return fresh
     }
     func downloadAsset(_ asset: AssetRecord) async throws -> Data {

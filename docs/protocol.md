@@ -108,6 +108,10 @@ Samsung Notes 4.4.45 for Android uploads a brand-new text note in two steps:
 
 Notes with attachments also register files with `POST /samsungnotes/v2/binaries/createUploadURLs` and upload them first; this client creates text notes only. Rather than reproduce the full attribute and page structure, it builds new notes from a template: the simplest plain-text note already in the cache (one page, no attachments or drawings), or one chosen with `scnotes template`. Every id in the template is replaced consistently, its title, text and span order data are replaced or removed, rewritten elements get new SHA-256 hashes, and times are set to now. The template stays on the device.
 
+## Favorites
+
+Samsung Notes keeps a note's star on the note itself: `attributes/@isFavorite` (`true` or `false`) in the note resource, not in the folder tree. Starring is an ordinary note update (`POST /notes/{serverId}/update`) with that attribute changed and the title and text unchanged. Checked live: a note starred from the Mac showed its star in Samsung Notes on a Galaxy S23+, and favorites starred on the phone and on Windows were read correctly.
+
 ## Trash and delete
 
 Samsung Notes keeps deleted notes in its Trash for 30 days, then deletes them for good on the device. Both steps change the note's tree node with `PATCH /folder`:

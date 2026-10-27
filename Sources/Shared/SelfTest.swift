@@ -110,6 +110,9 @@ enum SelfTest {
         guard foundation.rootElement()?.xmlString(options: []) == portable.rootElement()?.xmlString() else { throw NotesError.message("Portable XML differs from Foundation XML.") }
         #endif
         let fixture = try CloudDocument(serverID: "fixture", data: Data(fixtureXML.utf8))
+        let starred = try XMLDocument(data: CloudDocument(serverID: "star", data: Data(fixtureXML.utf8)).uploadXML(title: "", body: "Before", favorite: true),
+                                      options: [.nodeLoadExternalEntitiesNever]).rootElement()
+        guard starred?.first("attributes")?.attr("isFavorite") == "true", !fixture.isFavorite else { throw NotesError.message("Favorite flag mismatch.") }
         // Saves must stay readable on Samsung devices: timeStamp fits an Int32 and stale span data is gone, even when an
         // earlier version of this client left a microsecond timeStamp behind.
         let damaged = try CloudDocument(serverID: "damaged", data: Data(("<CompareNoteView><noteResource isLocked=\"false\" isEncrypted=\"false\"><noteTree ver=\"4000\"><bodyText id=\"body\" h=\"old\" t=\"0\"/></noteTree>"

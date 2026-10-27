@@ -34,6 +34,7 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | `scnotes edit NOTE [--title TEXT] [--body TEXT \| --body-file PATH\|-]` | Replace the title and/or typed text and save to Samsung Cloud |
 | `scnotes new TITLE [--folder PATH] [--body TEXT \| --body-file PATH\|-]` | Create a text note in Samsung Cloud, built from the template |
 | `scnotes template NOTE` | Copy new notes' structure from NOTE instead of the automatically chosen note (kept only on this Mac) |
+| `scnotes favorite NOTE` / `unfavorite NOTE` | Star or unstar a note (Favorites in Samsung Notes); its text is unchanged |
 | `scnotes trash NOTE` | Move a note to the Trash; Samsung Notes deletes it for good after 30 days |
 | `scnotes restore NOTE` | Bring a note back from the Trash to the folder it was in |
 | `scnotes delete NOTE` | Delete a note that is already in the Trash from Samsung Cloud for good; other devices keep their copy in their own Trash until it is emptied |

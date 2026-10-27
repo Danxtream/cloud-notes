@@ -133,6 +133,12 @@ struct NotesView: View {
             }
         }
         ToolbarItem {
+            let open = model.selection.flatMap { id in model.notes.first { $0.id == id } }
+            Button { if let open { Task { await model.setFavorite(open.id, !open.isFavorite) } } } label: {
+                Label(open?.isFavorite == true ? "Remove from Favorites" : "Add to Favorites", systemImage: open?.isFavorite == true ? "star.fill" : "star")
+            }.disabled(open == nil || open?.trashed == true || model.busy)
+        }
+        ToolbarItem {
             Button { Task { await model.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(model.busy || model.account.isEmpty)
         }
         ToolbarItem {
@@ -150,6 +156,7 @@ struct NotesView: View {
         VStack(spacing: 0) {
         List(selection: $model.folder) {
             Label("All notes", systemImage: "doc.text").tag("all")
+            Label("Favorites", systemImage: "star").tag("favorites")
             Section {
                 OutlineGroup(model.folders.tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
             } header: {
@@ -196,6 +203,7 @@ struct NotesView: View {
         List(model.visibleNotes, selection: $model.selection) { note in
             VStack(alignment: .leading, spacing: 5) {
                 HStack { Text(note.locked ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
+                    if note.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Favorite") }
                     if note.locked || note.encrypted { Image(systemName: "lock") } }
                 Text(note.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 if let days = note.daysLeftInTrash() {
@@ -210,6 +218,7 @@ struct NotesView: View {
                     Button("Restore") { Task { await model.change(note: note.id, .restore) } }
                     Button("Delete Forever…", role: .destructive) { pendingDelete = note.id }
                 } else {
+                    Button(note.isFavorite ? "Remove from Favorites" : "Add to Favorites") { Task { await model.setFavorite(note.id, !note.isFavorite) } }
                     Button("Move to Trash") { Task { await model.change(note: note.id, .trash) } }
                 }
             }

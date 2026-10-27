@@ -44,7 +44,8 @@ import Combine
     var dirty: Bool { document.map { $0.title != title || $0.body != body } ?? false }
     var visibleNotes: [NoteRecord] {
         notes.filter { note in
-            let inFolder = folder == "all" ? !note.trashed : folder == "trash" ? note.trashed : note.folder == folder && !note.trashed
+            let inFolder = folder == "all" ? !note.trashed : folder == "trash" ? note.trashed
+                : folder == "favorites" ? note.isFavorite && !note.trashed : note.folder == folder && !note.trashed
             return inFolder && (search.isEmpty || (note.title + " " + note.snippet).localizedCaseInsensitiveContains(search))
         }
     }
@@ -205,6 +206,19 @@ import Combine
             status = "Created note \(created.title.isEmpty ? "(untitled)" : created.title)"
         } catch { busy = false; self.error = error.localizedDescription; status = "The note was not created." }
     }
+    /// Stars or unstars a note through the usual save path (one upload per note), so it can't collide with an autosave.
+    /// An open note keeps its current text; another note is downloaded first so the star goes onto the newest revision.
+    func setFavorite(_ id: String, _ on: Bool) async {
+        guard let client else { return }
+        do {
+            let isOpen = selection == id && document != nil
+            let base = isOpen ? document! : try await client.download(id)
+            if !isOpen { loaded[id] = base }
+            starChanges[id] = on
+            await upload(base, title: isOpen ? title : base.title, body: isOpen ? body : base.body)
+            if starChanges[id] == nil { status = on ? "Added to Favorites." : "Removed from Favorites." }
+        } catch { self.error = error.localizedDescription }
+    }
     enum NoteChange { case trash, restore, deleteForever }
     /// Moves a note to the Trash, restores it to its folder, or deletes it for good (only from the Trash), then
     /// refreshes the library. Samsung Notes deletes trashed notes for good after 30 days.
@@ -313,13 +327,15 @@ import Combine
         uploading.insert(id); defer { uploading.remove(id) }
         var base = document, nextTitle = title, nextBody = body
         while let fresh = await uploadOnce(base, title: nextTitle, body: nextBody), let next = queued.removeValue(forKey: id),
-              next.title != fresh.title || next.body != fresh.body {
+              next.title != fresh.title || next.body != fresh.body || starChanges[id] != nil {
             base = fresh; nextTitle = next.title; nextBody = next.body
         }
         queued[id] = nil
     }
     private var uploading: Set<String> = []
     private var queued: [String: (title: String, body: String)] = [:]
+    /// Star changes waiting to go up with the note's next save.
+    private var starChanges: [String: Bool] = [:]
     /// One verified save. Typing that happened meanwhile is kept and saved next; a note changed on another device stops
     /// autosave and keeps the local draft. Returns the saved document, or nil when the save failed.
     private func uploadOnce(_ document: CloudDocument, title savedTitle: String, body savedBody: String) async -> CloudDocument? {
@@ -330,7 +346,9 @@ import Combine
         do {
             // Use a fresh object so a failed upload cannot mutate the displayed baseline.
             let copy = try CloudDocument(serverID: id, data: document.original)
-            let fresh = try await client.save(copy, title: savedTitle, body: savedBody)
+            let star = starChanges[id]
+            let fresh = try await client.save(copy, title: savedTitle, body: savedBody, favorite: star)
+            if star != nil, starChanges[id] == star { starChanges[id] = nil }
             loaded[id] = fresh
             if let i = notes.firstIndex(where: { $0.id == id }) {
                 notes[i].commit = fresh.commit
@@ -387,5 +405,6 @@ extension NoteRecord {
         title = heading.isEmpty ? (firstLine.isEmpty ? "Untitled note" : firstLine) : heading
         snippet = String(document.body.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))
         resourceID = document.resource.attr("id")
+        favorite = document.isFavorite
     }
 }
