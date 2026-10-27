@@ -99,6 +99,14 @@ struct NotesView: View {
             }
         }
         .toolbar { windowToolbar }
+        .alert("New note", isPresented: $creatingNote) {
+            TextField("Title", text: $newNoteTitle)
+            Button("Create") { let title = newNoteTitle; Task { await model.createNote(title: title) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let folder = model.newFolderParent
+            Text(folder == "root" ? "Not in a folder." : "In \(model.folders.path(of: folder)).")
+        }
         Divider()
         HStack(spacing: 8) {
             if model.busy || model.savesInFlight > 0 { ProgressView().controlSize(.small).frame(width: 14, height: 14) }
@@ -137,7 +145,7 @@ struct NotesView: View {
         .onChange(of: model.selection) { if $0 == nil && noteFullView { showList() } }
         .frame(minWidth: 440, minHeight: 400)
     }
-    /// Back or Open fully, then the note and library actions.
+    /// Back or Open fully, then New note, the star, and the note and library actions.
     @ToolbarContentBuilder var windowToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             if noteFullView {
@@ -146,6 +154,10 @@ struct NotesView: View {
                 Button { openNoteFully() } label: { Label("Open note fully", systemImage: "arrow.up.left.and.arrow.down.right") }
                     .disabled(model.document == nil).help("Open the note in the whole window (or double-click it)")
             }
+        }
+        ToolbarItem {
+            Button { newNoteTitle = ""; creatingNote = true } label: { Label("New note", systemImage: "square.and.pencil") }
+                .disabled(model.busy || model.account.isEmpty).help("New note")
         }
         ToolbarItem {
             let open = model.selection.flatMap { id in model.notes.first { $0.id == id } }
@@ -340,21 +352,7 @@ struct NotesView: View {
             Text("It is removed from Samsung Cloud and can't be restored here. Samsung Notes on your other devices keeps its own copy in its Trash until that Trash is emptied (after 30 days, or by you).")
         }
         .searchable(text: $model.search, prompt: "Search notes")
-        .toolbar {
-            ToolbarItem {
-                Button { newNoteTitle = ""; creatingNote = true } label: { Label("New note", systemImage: "square.and.pencil") }
-                    .disabled(model.busy || model.account.isEmpty).help("New note")
-            }
-            ToolbarItem { sortMenu }
-        }
-        .alert("New note", isPresented: $creatingNote) {
-            TextField("Title", text: $newNoteTitle)
-            Button("Create") { let title = newNoteTitle; Task { await model.createNote(title: title) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            let folder = model.newFolderParent
-            Text(folder == "root" ? "Not in a folder." : "In \(model.folders.path(of: folder)).")
-        }
+        .toolbar { ToolbarItem { sortMenu } }
         .navigationSplitViewColumnWidth(min: 200, ideal: 260)
     }
     /// Bold, italic, underline, strikethrough, colour, highlight, size and lists for the open note's text, with
