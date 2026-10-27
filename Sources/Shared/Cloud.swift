@@ -109,7 +109,13 @@ struct NoteRecord: Identifiable, Codable {
         return max(0, 30 - Int((now.timeIntervalSince1970 * 1000 - moved) / 86_400_000))
     }
 }
-struct FolderRecord: Identifiable, Codable { var id: String; var name: String; var parent: String }
+struct FolderRecord: Identifiable, Codable {
+    var id: String; var name: String; var parent: String
+    /// The folder's `color` from the cloud tree; optional, so cached libraries written before this field still decode.
+    var color: Int? = nil
+    /// The colour Samsung Notes draws the folder in.
+    var folderColor: FolderColor { FolderColor(stored: color ?? -1) }
+}
 /// A folder and its subfolders for outline views. `children` is nil for a leaf, so no disclosure arrow is shown.
 struct FolderNode: Identifiable { var folder: FolderRecord; var children: [FolderNode]?; var id: String { folder.id } }
 extension Array where Element == FolderRecord {
@@ -138,6 +144,14 @@ extension Array where Element == FolderRecord {
     /// outside the Trash is in them, as the phone hides them when empty.
     func listed(with notes: [NoteRecord]) -> [FolderRecord] {
         filter { folder in !folder.id.contains(":///") || notes.contains { $0.folder == folder.id && !$0.trashed } }
+    }
+    /// The ids of the folders inside folder `id`, at any depth (a parent loop is followed once).
+    func descendants(of id: String) -> [String] {
+        var found: [String] = [], queue = [id]
+        while let parent = queue.popLast() {
+            for child in self where child.parent == parent && child.id != id && !found.contains(child.id) { found.append(child.id); queue.append(child.id) }
+        }
+        return found
     }
     /// The folder's names from the top level down, joined with "/", for example "Dev/Repos".
     func path(of id: String) -> String {
@@ -447,7 +461,8 @@ final class CloudClient {
         for node in folderXML.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? [] {
             let state = node.value("state")
             if node.attr("type") == "folder", state == "normal" {
-                folders.append(FolderRecord(id: node.attr("id"), name: decodedCloudName(node.value("name")), parent: node.value("parentFolderNodeId")))
+                folders.append(FolderRecord(id: node.attr("id"), name: decodedCloudName(node.value("name")), parent: node.value("parentFolderNodeId"),
+                                            color: Int(node.value("color"))))
             } else if node.attr("type") == "note" {
                 if let id = notes.values.first(where: { $0.resourceID == node.attr("id") })?.id {
                     notes[id]?.folder = node.value("parentFolderNodeId")
@@ -548,11 +563,7 @@ final class CloudClient {
     /// Creates a folder under `parent` ("root" for the top level) the way Samsung Notes does, then reads the
     /// tree back to confirm Samsung stored it. Built-in folders such as Math notes cannot hold subfolders.
     func createFolder(named rawName: String, in parent: String) async throws -> FolderRecord {
-        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 100, !name.contains("/"),
-              !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else {
-            throw NotesError.message("Folder names need 1 to 100 characters and no \"/\".")
-        }
+        let name = try Self.folderName(rawName)
         guard !parent.contains(":///") else { throw NotesError.message("Built-in folders cannot contain subfolders.") }
         let elements = try await treeElements()
         let tree = elements.map(Self.treeNode)
@@ -571,6 +582,103 @@ final class CloudClient {
             throw NotesError.message("Samsung accepted the request, but the new folder did not appear. Refresh before trying again.")
         }
         return FolderRecord(id: id, name: name, parent: parent)
+    }
+    /// `raw` trimmed, if it can name a folder: 1 to 100 characters, no "/" (paths use it) and no control characters.
+    static func folderName(_ raw: String) throws -> String {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 100, !name.contains("/"),
+              !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else {
+            throw NotesError.message("Folder names need 1 to 100 characters and no \"/\".")
+        }
+        return name
+    }
+    /// Renames a folder the way Samsung Notes does: its tree node goes up again with the new name (and the folders above
+    /// it), then the tree is read back to confirm it. A folder beside it may not have the same name.
+    func renameFolder(_ id: String, to rawName: String) async throws {
+        let name = try Self.folderName(rawName)
+        guard !id.contains(":///") else { throw NotesError.message("Built-in folders keep their names.") }
+        let nodes = try await treeElements()
+        guard let node = nodes.first(where: { $0.attr("id") == id && $0.attr("type") == "folder" && $0.value("state") == "normal" }) else {
+            throw NotesError.message("The folder no longer exists. Refresh and try again.")
+        }
+        var fields = TreeNodeFields(node)
+        let siblings = nodes.map(Self.treeNode).filter { $0.type == "folder" && $0.state == "normal" && $0.parent == fields.parent && $0.id != id }
+        if siblings.contains(where: { $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            throw NotesError.message("A folder named \"\(name)\" already exists there.")
+        }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        fields.encodedName = Data(name.utf8).base64EncodedString(); fields.modified = now
+        let latest = nodes.compactMap { Int64($0.value("syncModifiedTime")) }.max() ?? 0
+        let body = Self.folderResourceXML([fields] + Self.ancestors(of: fields.parent, in: nodes), latestSync: latest, now: now)
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
+        guard try await treeNodes().contains(where: { $0.id == id && $0.name == name }) else {
+            throw NotesError.message("Samsung accepted the request, but the folder kept its old name. Refresh before trying again.")
+        }
+    }
+    /// The tree nodes for moving folder `id` to the Trash as Samsung Notes 4.4.48 does (seen on a phone): the folder moves
+    /// to the top level with a restore path to where it was, everything inside it (subfolders and notes) is marked
+    /// trashed where it stands with its own restore path, and the folders above it go along with a fresh modified time
+    /// for the folder it left.
+    static func trashFolderNodes(_ id: String, in nodes: [XMLElement], now: Int64) throws -> [TreeNodeFields] {
+        guard let node = nodes.first(where: { $0.attr("id") == id && $0.attr("type") == "folder" && $0.value("state") == "normal" }) else {
+            throw NotesError.message("The folder no longer exists. Refresh and try again.")
+        }
+        let folders = nodes.filter { $0.attr("type") == "folder" && $0.value("state") == "normal" }
+            .map { FolderRecord(id: $0.attr("id"), name: decodedCloudName($0.value("name")), parent: $0.value("parentFolderNodeId")) }
+        var top = TreeNodeFields(node)
+        let parent = top.parent
+        top.state = "trashed"; top.restorePath = Self.restorePath(of: id, folders: folders); top.parent = "root"; top.trashed = now; top.modified = now
+        var inside: Set<String> = [id], contents: [TreeNodeFields] = [], added = true
+        while added {
+            added = false
+            for child in nodes where child.value("state") == "normal" && inside.contains(child.value("parentFolderNodeId")) && !contents.contains(where: { $0.id == child.attr("id") }) {
+                // Samsung requires a restore path on every trashed node: a folder's own path, a note's folder's path.
+                var fields = TreeNodeFields(child)
+                fields.state = "trashed"; fields.trashed = now
+                fields.restorePath = Self.restorePath(of: child.attr("type") == "folder" ? fields.id : fields.parent, folders: folders)
+                contents.append(fields)
+                if child.attr("type") == "folder" { inside.insert(child.attr("id")); added = true }
+            }
+        }
+        var above = Self.ancestors(of: parent, in: nodes)
+        if !above.isEmpty { above[0].modified = now }
+        return [top] + contents + above
+    }
+    /// Moves a folder, its subfolders and their notes to the Trash the way Samsung Notes does (see `trashFolderNodes`),
+    /// then reads the tree back to confirm it. Like Samsung Notes without the unlock, it refuses a folder that holds a
+    /// locked note (`locked`: the tree ids of locked notes).
+    func trashFolder(_ id: String, locked: Set<String>) async throws {
+        guard !id.contains(":///") else { throw NotesError.message("Built-in folders cannot be deleted.") }
+        let nodes = try await treeElements()
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let changed = try Self.trashFolderNodes(id, in: nodes, now: now)
+        if changed.contains(where: { $0.type == "note" && locked.contains($0.id) }) {
+            throw NotesError.message("This folder holds a locked note. Unlock or move it in Samsung Notes first.")
+        }
+        let latest = nodes.compactMap { Int64($0.value("syncModifiedTime")) }.max() ?? 0
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: Self.folderResourceXML(changed, latestSync: latest, now: now),
+                              contentType: "application/xml;Charset=utf-8")
+        guard try await treeNodes().contains(where: { $0.id == id && $0.state == "trashed" }) else {
+            throw NotesError.message("Samsung accepted the request, but the folder is still there. Refresh before trying again.")
+        }
+    }
+    /// Changes a folder's colour the way Samsung Notes does: the folder's tree node goes up again with the new `color`
+    /// (and the folders above it) in `PATCH /folder`, then the tree is read back to confirm Samsung stored it.
+    func setFolderColor(_ id: String, _ color: FolderColor) async throws {
+        guard !id.contains(":///") else { throw NotesError.message("Built-in folders keep Samsung's colour.") }
+        let nodes = try await treeElements()
+        guard let node = nodes.first(where: { $0.attr("id") == id && $0.attr("type") == "folder" && $0.value("state") == "normal" }) else {
+            throw NotesError.message("The folder no longer exists. Refresh and try again.")
+        }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var fields = TreeNodeFields(node)
+        fields.color = color.stored; fields.modified = now
+        let latest = nodes.compactMap { Int64($0.value("syncModifiedTime")) }.max() ?? 0
+        let body = Self.folderResourceXML([fields] + Self.ancestors(of: fields.parent, in: nodes), latestSync: latest, now: now)
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
+        guard try await treeElements().contains(where: { $0.attr("id") == id && Int($0.value("color")) == color.stored }) else {
+            throw NotesError.message("Samsung accepted the request, but the folder's colour did not change. Refresh before trying again.")
+        }
     }
     /// Creates a text note in `folder` ("root" for none) the way Samsung Notes does: its tree node goes up first with
     /// `PATCH /folder`, then the note itself with `POST /notes`, built from `template` (see `CloudDocument.newNoteXML`).

@@ -28,7 +28,7 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | `scnotes status` | Account, connection type, cache size, last sync, data directory |
 | `scnotes sync` | Refresh the index and download changed or missing documents |
 | `scnotes list [--folder NAME\|PATH] [--trash] [--limit N]` | Notes, newest first: ID, date, title, folder path |
-| `scnotes folders` | Folder IDs and paths; subfolders appear as `Parent/Child`. Built-in folders such as Math notes are listed only while they hold notes, as on the phone |
+| `scnotes folders` | Folder IDs, paths and colours; subfolders appear as `Parent/Child`. Built-in folders such as Math notes are listed only while they hold notes, as on the phone |
 | `scnotes search QUERY` | Case-insensitive search of titles and full typed text |
 | `scnotes show NOTE [--markdown \| --xml]` | Title, text, attachment names and drawing page count; `--markdown` shows the text's formatting as Markdown-style text (see below), `--xml` prints the original cloud document |
 | `scnotes edit NOTE [--title TEXT] [--body TEXT \| --body-file PATH\|-] [--markdown]` | Replace the title and/or typed text and save to Samsung Cloud; with `--markdown` the text is Markdown-style and formatting is kept |
@@ -39,6 +39,9 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | `scnotes restore NOTE` | Bring a note back from the Trash to the folder it was in |
 | `scnotes delete NOTE` | Delete a note that is already in the Trash from Samsung Cloud for good; other devices keep their copy in their own Trash until it is emptied |
 | `scnotes mkdir PATH` | Create a folder in Samsung Cloud; `Dev/New ideas` creates *New ideas* inside *Dev* |
+| `scnotes folder-color PATH COLOR` | Give a folder one of Samsung Notes' twelve colours: grey, red, orange, yellow, light-green, green, light-blue, blue, violet, light-purple, pink, light-brown |
+| `scnotes rename-folder PATH NAME` | Rename a folder |
+| `scnotes trash-folder PATH` | Move a folder, its subfolders and their notes to the Trash, as deleting a folder in Samsung Notes does |
 | `scnotes export NOTE DIRECTORY` | Write `NOTE.samsungnote/` with `document.xml`, `text.txt` and attachments |
 | `scnotes drawing NOTE OUTPUT.pdf` | Write the approximate handwriting preview |
 | `scnotes login` / `logout` | Open the app to sign in / remove the saved connection (cache and drafts remain) |

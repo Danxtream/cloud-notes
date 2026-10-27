@@ -67,6 +67,11 @@ struct NotesView: View {
     @State var showDrawing = false
     @State var creatingFolder = false
     @State var newFolderName = ""
+    /// The folder a new folder goes into when created from a folder's menu; nil for the + button's usual place.
+    @State var newFolderParent: String?
+    @State var renamingFolder: FolderRecord?
+    @State var folderNewName = ""
+    @State var deletingFolder: FolderRecord?
     @State var creatingNote = false
     @State var newNoteTitle = ""
     @State var pendingDelete: String?
@@ -168,12 +173,19 @@ struct NotesView: View {
             Label("All notes", systemImage: "doc.text").tag("all")
             Label("Favorites", systemImage: "star").tag("favorites")
             Section {
-                OutlineGroup(model.folders.listed(with: model.notes).tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
+                OutlineGroup(model.folders.listed(with: model.notes).tree, children: \.children) { node in
+                    Label { Text(node.folder.name) } icon: {
+                        // Grey folders are drawn grey, as on the phone, not in the accent colour.
+                        Image(systemName: "folder").foregroundStyle(node.folder.folderColor.shown.map { AnyShapeStyle(Self.shade($0)) } ?? AnyShapeStyle(.secondary))
+                    }
+                    .tag(node.id)
+                    .contextMenu { folderMenu(node.folder) }
+                }
             } header: {
                 HStack {
                     Text("Folders")
                     Spacer()
-                    Button { newFolderName = ""; creatingFolder = true } label: { Image(systemName: "plus") }
+                    Button { newFolderParent = nil; newFolderName = ""; creatingFolder = true } label: { Image(systemName: "plus") }
                         .buttonStyle(.borderless).disabled(model.busy || model.account.isEmpty)
                         .help("New folder").accessibilityLabel("New folder")
                 }
@@ -183,12 +195,27 @@ struct NotesView: View {
         .navigationTitle("Samsung Cloud Notes")
         .alert("New folder", isPresented: $creatingFolder) {
             TextField("Name", text: $newFolderName)
-            Button("Create") { let name = newFolderName; Task { await model.createFolder(named: name) } }
+            Button("Create") { let name = newFolderName, parent = newFolderParent; Task { await model.createFolder(named: name, in: parent) } }
                 .disabled(newFolderName.trimmingCharacters(in: .whitespaces).isEmpty)
             Button("Cancel", role: .cancel) {}
         } message: {
-            let parent = model.newFolderParent
+            let parent = newFolderParent ?? model.newFolderParent
             Text(parent == "root" ? "At the top level of your Samsung Notes folders." : "Inside \(model.folders.path(of: parent)).")
+        }
+        .alert("Rename folder", isPresented: Binding(get: { renamingFolder != nil }, set: { if !$0 { renamingFolder = nil } })) {
+            TextField("Name", text: $folderNewName)
+            Button("Rename") { if let folder = renamingFolder { let name = folderNewName; Task { await model.renameFolder(folder.id, to: name) } } }
+                .disabled(folderNewName.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Rename \"\(renamingFolder?.name ?? "")\" in Samsung Notes.") }
+        .confirmationDialog("Delete this folder?", isPresented: Binding(get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } })) {
+            Button("Move to Trash", role: .destructive) { if let folder = deletingFolder { Task { await model.trashFolder(folder.id) } } }
+            Button("Cancel", role: .cancel) { deletingFolder = nil }
+        } message: {
+            let folder = deletingFolder
+            let inside = Set([folder?.id ?? ""] + model.folders.descendants(of: folder?.id ?? ""))
+            let count = model.notes.filter { !$0.trashed && inside.contains($0.folder) }.count
+            Text("\"\(folder?.name ?? "")\", its subfolders and \(count == 1 ? "its note" : "their \(count) notes") move to the Trash, as in Samsung Notes. They can be restored from the Trash in Samsung Notes for 30 days.")
         }
         Divider()
             VStack(alignment: .leading, spacing: 6) {
@@ -207,6 +234,47 @@ struct NotesView: View {
             }.font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding(12)
         }
         .navigationSplitViewColumnWidth(min: 160, ideal: 200)
+    }
+    /// A folder's right-click menu, as Samsung Notes' long-press menu: new subfolder, rename, colour and delete.
+    /// Built-in folders such as Math notes have none of these.
+    @ViewBuilder func folderMenu(_ folder: FolderRecord) -> some View {
+        if !folder.id.contains(":///") {
+            Group {
+                Button("New Subfolder…") { newFolderParent = folder.id; newFolderName = ""; creatingFolder = true }
+                Button("Rename…") { folderNewName = folder.name; renamingFolder = folder }
+                Menu("Change Folder Colour") { folderColourMenu(folder) }
+                Divider()
+                Button("Delete Folder…", role: .destructive) { deletingFolder = folder }
+            }.disabled(model.busy || model.account.isEmpty)
+        }
+    }
+    /// A folder's Colour menu: Samsung Notes' twelve folder colours with a swatch each, the current one ticked.
+    /// Built-in folders such as Math notes keep Samsung's colour.
+    @ViewBuilder func folderColourMenu(_ folder: FolderRecord) -> some View {
+        if !folder.id.contains(":///") {
+            Picker("Colour", selection: Binding(get: { folder.folderColor }, set: { colour in
+                if colour != folder.folderColor { Task { await model.setFolderColor(folder.id, colour) } }
+            })) {
+                ForEach(FolderColor.allCases) { colour in
+                    Label { Text(colour.name) } icon: { Image(nsImage: Self.swatch(colour.shown)) }.tag(colour)
+                }
+            }
+            .pickerStyle(.inline).disabled(model.busy || model.account.isEmpty)
+        }
+    }
+    /// A colour from a 0xRRGGBB value.
+    static func shade(_ rgb: UInt32) -> Color {
+        Color(red: Double((rgb >> 16) & 0xFF) / 255, green: Double((rgb >> 8) & 0xFF) / 255, blue: Double(rgb & 0xFF) / 255)
+    }
+    /// A small round swatch for menus, which draw template images in one colour; grey (nil) uses the system grey.
+    static func swatch(_ rgb: UInt32?) -> NSImage {
+        let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            (rgb.map { NSColor(shade($0)) } ?? NSColor.systemGray).setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
     /// The notes of the selected folder; click to preview, double-click to open fully.
     @ViewBuilder var notesListPane: some View {

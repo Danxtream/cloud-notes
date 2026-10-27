@@ -20,7 +20,7 @@ enum CommandLineTool {
       sync                           Download changed notes into the local cache
       list [--folder NAME|PATH] [--trash] [--limit N]
                                      List notes, newest first
-      folders [--xml]                List folders with their paths (Parent/Child), or Samsung's raw folder tree
+      folders [--xml]                List folders with their paths (Parent/Child) and colours, or Samsung's raw folder tree
       search QUERY                   Search titles and full typed text
       show NOTE [--markdown | --xml] Print a note's title and text, with its formatting as
                                      Markdown-style text, or the original XML
@@ -38,6 +38,10 @@ enum CommandLineTool {
       restore NOTE                   Bring a note back from the Trash to its folder
       delete NOTE                    Delete a note that is in the Trash for good
       mkdir PATH                     Create a folder in Samsung Cloud, e.g. "Dev/New ideas"
+      folder-color PATH COLOR        Give a folder one of Samsung Notes' colours: grey, red, orange, yellow,
+                                     light-green, green, light-blue, blue, violet, light-purple, pink, light-brown
+      rename-folder PATH NAME        Rename a folder
+      trash-folder PATH              Move a folder, its subfolders and their notes to the Trash
       export NOTE DIRECTORY          Write NOTE.samsungnote (original XML, text, attachments)
       drawing NOTE OUTPUT.pdf        Write the approximate handwriting preview
 
@@ -125,8 +129,17 @@ enum CommandLineTool {
             }
             let library = try await Library.load(offline: options.offline)
             let folders = library.index.folders.listed(with: library.index.notes)
-            if options.json { try printJSON(folders.map { ["id": $0.id, "name": $0.name, "parent": $0.parent, "path": folders.path(of: $0.id)] }) }
-            else { for folder in folders.sorted(by: { folders.path(of: $0.id).localizedStandardCompare(folders.path(of: $1.id)) == .orderedAscending }) { print("\(folder.id)\t\(folders.path(of: folder.id))") } }
+            if options.json { try printJSON(folders.map { ["id": $0.id, "name": $0.name, "parent": $0.parent, "path": folders.path(of: $0.id), "color": $0.folderColor.rawValue] }) }
+            else {
+                for folder in folders.sorted(by: { folders.path(of: $0.id).localizedStandardCompare(folders.path(of: $1.id)) == .orderedAscending }) {
+                    print("\(folder.id)\t\(folders.path(of: folder.id))" + (folder.folderColor == .grey ? "" : "\t\(folder.folderColor.name.lowercased())"))
+                }
+            }
+        case "folder-color":
+            try arguments(2, "PATH COLOR")
+            try await folderColor(options.positional[0], options.positional[1], options)
+        case "rename-folder": try arguments(2, "PATH NAME"); try await renameFolder(options.positional[0], to: options.positional[1], options)
+        case "trash-folder": try arguments(1, "PATH"); try await trashFolder(options.positional[0], options)
         case "search": try arguments(1, "QUERY"); try await search(options.positional[0], options)
         case "show": try arguments(1, "NOTE [--markdown | --xml]"); try await show(options.positional[0], options)
         case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-] [--markdown]"); try await edit(options.positional[0], options)
@@ -325,6 +338,38 @@ enum CommandLineTool {
         let folders = library.index.folders + [created]
         if options.json { try printJSON(["id": created.id, "name": created.name, "parent": created.parent, "path": folders.path(of: created.id)]) }
         else { print("Created \(folders.path(of: created.id))\t\(created.id)") }
+    }
+
+    /// Gives the folder at PATH one of Samsung Notes' folder colours.
+    @MainActor static func folderColor(_ path: String, _ name: String, _ options: Options) async throws {
+        if options.offline { throw Failure(message: "folder-color writes to Samsung Cloud; run it without --offline.", code: 2) }
+        guard let color = FolderColor(name: name) else {
+            throw Failure(message: "Unknown colour \"\(name)\". Use one of: " + FolderColor.allCases.map(\.rawValue).joined(separator: ", ") + ".", code: 2)
+        }
+        let library = try await Library.load(offline: false, strict: true)
+        let folder = try library.folder(path)
+        try await library.client.setFolderColor(folder.id, color)
+        print("\(library.index.folders.path(of: folder.id)) is now \(color.name.lowercased()).")
+    }
+
+    /// Renames the folder at PATH; the new name may not contain "/".
+    @MainActor static func renameFolder(_ path: String, to name: String, _ options: Options) async throws {
+        if options.offline { throw Failure(message: "rename-folder writes to Samsung Cloud; run it without --offline.", code: 2) }
+        let library = try await Library.load(offline: false, strict: true)
+        let folder = try library.folder(path)
+        try await library.client.renameFolder(folder.id, to: name)
+        print("Renamed \(library.index.folders.path(of: folder.id)) to \(try CloudClient.folderName(name)).")
+    }
+
+    /// Moves the folder at PATH, its subfolders and their notes to the Trash, as deleting a folder in Samsung Notes does.
+    @MainActor static func trashFolder(_ path: String, _ options: Options) async throws {
+        if options.offline { throw Failure(message: "trash-folder writes to Samsung Cloud; run it without --offline.", code: 2) }
+        let library = try await Library.load(offline: false, strict: true)
+        let folder = try library.folder(path)
+        let inside = Set([folder.id] + library.index.folders.descendants(of: folder.id))
+        let notes = library.index.notes.filter { !$0.trashed && inside.contains($0.folder) }
+        try await library.client.trashFolder(folder.id, locked: Set(library.index.notes.filter { $0.locked || $0.encrypted }.map(\.resourceID)))
+        print("Moved \(library.index.folders.path(of: folder.id)) and \(notes.count == 1 ? "its note" : "\(notes.count) notes") to the Trash. Samsung Notes deletes them for good after 30 days.")
     }
 
     /// Creates a text note titled TITLE in --folder (no folder by default) from the saved template.

@@ -185,17 +185,55 @@ import Combine
     }
     /// Where a new folder goes: inside the selected folder, or at the top level when All notes, Trash or a built-in folder is selected.
     var newFolderParent: String { folders.contains { $0.id == folder } && !folder.contains(":///") ? folder : "root" }
-    /// Creates a folder in Samsung Cloud, refreshes the library and selects the new folder.
-    func createFolder(named name: String) async {
+    /// Creates a folder in Samsung Cloud, inside `parent` or else where `newFolderParent` says, refreshes the library and
+    /// selects the new folder.
+    func createFolder(named name: String, in parent: String? = nil) async {
         guard let client, !busy else { return }
         busy = true; status = "Creating folder…"
         do {
-            let created = try await client.createFolder(named: name, in: newFolderParent)
+            let created = try await client.createFolder(named: name, in: parent ?? newFolderParent)
             busy = false
             await refresh()
             folder = created.id
             status = "Created folder \(created.name)"
         } catch { busy = false; self.error = error.localizedDescription; status = "The folder was not created." }
+    }
+    /// Renames a folder in Samsung Cloud and refreshes the library.
+    func renameFolder(_ id: String, to name: String) async {
+        guard let client, !busy else { return }
+        busy = true; status = "Renaming folder…"
+        do {
+            try await client.renameFolder(id, to: name)
+            busy = false
+            await refresh()
+            status = "Renamed the folder to \(name.trimmingCharacters(in: .whitespacesAndNewlines))"
+        } catch { busy = false; self.error = error.localizedDescription; status = "The folder was not renamed." }
+    }
+    /// Moves a folder, its subfolders and their notes to the Trash in Samsung Cloud, then shows All notes if the
+    /// selected folder went with it.
+    func trashFolder(_ id: String) async {
+        guard let client, !busy else { return }
+        preserveDraft(); busy = true; status = "Moving the folder to the Trash…"
+        do {
+            try await client.trashFolder(id, locked: Set(notes.filter { $0.locked || $0.encrypted }.map(\.resourceID)))
+            busy = false
+            let gone = Set([id] + folders.descendants(of: id))
+            await refresh()
+            if gone.contains(folder) { folder = "all" }
+            if let selection, notes.first(where: { $0.id == selection })?.trashed == true { self.selection = nil; document = nil }
+            status = "Moved the folder and its notes to the Trash. Samsung Notes deletes them for good after 30 days."
+        } catch { busy = false; self.error = error.localizedDescription; status = "The folder was not deleted." }
+    }
+    /// Changes a folder's colour in Samsung Cloud and refreshes the library.
+    func setFolderColor(_ id: String, _ color: FolderColor) async {
+        guard let client, !busy else { return }
+        busy = true; status = "Changing the folder's colour…"
+        do {
+            try await client.setFolderColor(id, color)
+            busy = false
+            await refresh()
+            status = "Folder colour changed to \(color.name.lowercased())"
+        } catch { busy = false; self.error = error.localizedDescription; status = "The folder's colour was not changed." }
     }
     /// Creates a text note in the selected folder (none for All notes, Trash or a built-in folder), refreshes the
     /// library and opens the new note. The first time, the simplest cached text note lends its structure.

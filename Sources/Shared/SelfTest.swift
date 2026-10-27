@@ -88,6 +88,21 @@ enum SelfTest {
         guard CloudClient.restorePath(of: "b", folders: tree) == "uncategorized:///Dev/Repos", CloudClient.restorePath(of: "root", folders: tree) == "uncategorized:///",
               CloudClient.restoreParent("uncategorized:///Dev/Repos", folders: tree) == "b", CloudClient.restoreParent("uncategorized:///Gone", folders: tree) == "root",
               CloudClient.restoreParent("uncategorized:///", folders: tree) == "root", CloudClient.restoreParent("", folders: tree) == "root" else { throw NotesError.message("Restore path mismatch.") }
+        // Deleting a folder as a phone did: it goes to the top level with a restore path to where it was, what it holds
+        // is trashed where it stands, and the folder it left goes along with a fresh modified time.
+        let deleting = try XMLDocument(xmlString: "<r>" + treeNode("a", "folder", "root", "Dev") + treeNode("b", "folder", "a", "Repos") + treeNode("c", "folder", "b", "Old")
+            + treeNode("n", "note", "b", "Note") + treeNode("m", "note", "c", "Deep") + treeNode("o", "note", "a", "Stays") + "</r>", options: [.nodeLoadExternalEntitiesNever])
+        let trashing = try CloudClient.trashFolderNodes("b", in: deleting.rootElement()?.elements(forName: "node") ?? [], now: 9)
+        guard trashing.map(\.id) == ["b", "c", "n", "m", "a"], trashing[0].state == "trashed", trashing[0].parent == "root",
+              trashing[0].restorePath == "uncategorized:///Dev/Repos", trashing[0].trashed == 9, trashing[0].modified == 9,
+              trashing[1...3].allSatisfy({ $0.state == "trashed" && $0.trashed == 9 && $0.modified == 2 }), trashing[1...3].map(\.parent) == ["b", "b", "c"],
+              trashing[1...3].map(\.restorePath) == ["uncategorized:///Dev/Repos/Old", "uncategorized:///Dev/Repos", "uncategorized:///Dev/Repos/Old"],
+              trashing[4].state == "normal", trashing[4].modified == 9 else { throw NotesError.message("Folder delete nodes mismatch.") }
+        // Folder colours: every picker value and its 70% alpha variant read back as that colour; -1 and others are grey.
+        guard FolderColor.allCases.allSatisfy({ FolderColor(stored: $0.stored) == $0 }), FolderColor.red.stored == -48845,
+              FolderColor(stored: Int(Int32(bitPattern: 0xB3FF_4133))) == .red, FolderColor(stored: -1) == .grey, FolderColor(stored: 0) == .grey,
+              FolderColor(name: "Light Blue") == .lightBlue, FolderColor(name: "light-purple") == .lightPurple, FolderColor(name: "default") == .grey,
+              FolderColor(name: "teal") == nil else { throw NotesError.message("Folder colour mismatch.") }
         let trashedNode = try XMLDocument(data: CloudClient.folderResourceXML([CloudClient.TreeNodeFields(id: "n1", type: "note", encodedName: "IA==", parent: "root", state: "trashed",
             order: 999_999, created: 1, modified: 2, trashed: 5, restorePath: "uncategorized:///Dev")], latestSync: 3, now: 5), options: [.nodeLoadExternalEntitiesNever])
         guard let trashed = trashedNode.rootElement()?.first("nodeList")?.first("node"), trashed.value("state") == "trashed", trashed.value("trashedTime") == "5",
