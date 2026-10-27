@@ -206,6 +206,10 @@ final class CloudDocument {
     }
     /// Whether the note is starred; Samsung Notes keeps this on the note itself (`attributes/@isFavorite`).
     var isFavorite: Bool { resource.first("attributes")?.attr("isFavorite").lowercased() == "true" }
+    /// The body's formatting as downloaded, or nil when there is no body or its styling cannot be read.
+    var richBody: RichText? { bodyObject.flatMap { try? RichText(encoded: $0.value("text")) } }
+    /// The body as Markdown-style text (see `RichText.markdown`), or as plain text when its formatting cannot be read.
+    var markdownBody: String { richBody?.markdown ?? body }
     /// The note to upload with a new title and text, and with its star changed when `favorite` is given.
     func uploadXML(title newTitle: String, body newBody: String, favorite: Bool? = nil, now: Date = Date()) throws -> Data {
         if let textIssue { throw NotesError.message(textIssue) }

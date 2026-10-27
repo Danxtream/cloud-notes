@@ -22,7 +22,8 @@ enum CommandLineTool {
                                      List notes, newest first
       folders [--xml]                List folders with their paths (Parent/Child), or Samsung's raw folder tree
       search QUERY                   Search titles and full typed text
-      show NOTE [--xml]              Print a note's title and text (or original XML)
+      show NOTE [--markdown | --xml] Print a note's title and text, with its formatting as
+                                     Markdown-style text, or the original XML
 
     Changes
       edit NOTE [--title TEXT] [--body TEXT | --body-file PATH|-] [--discard-draft]
@@ -64,7 +65,7 @@ enum CommandLineTool {
         var offline: Bool { flags.contains("offline") }
     }
     static let valueOptions: Set<String> = ["folder", "limit", "title", "body", "body-file"]
-    static let flagOptions: Set<String> = ["json", "offline", "trash", "xml", "discard-draft", "help"]
+    static let flagOptions: Set<String> = ["json", "offline", "trash", "xml", "markdown", "discard-draft", "help"]
 
     static func run(_ arguments: [String]) -> Never {
         guard let command = arguments.first, !["help", "-h", "--help"].contains(command) else { print(usage); exit(0) }
@@ -126,7 +127,7 @@ enum CommandLineTool {
             if options.json { try printJSON(folders.map { ["id": $0.id, "name": $0.name, "parent": $0.parent, "path": folders.path(of: $0.id)] }) }
             else { for folder in folders.sorted(by: { folders.path(of: $0.id).localizedStandardCompare(folders.path(of: $1.id)) == .orderedAscending }) { print("\(folder.id)\t\(folders.path(of: folder.id))") } }
         case "search": try arguments(1, "QUERY"); try await search(options.positional[0], options)
-        case "show": try arguments(1, "NOTE [--xml]"); try await show(options.positional[0], options)
+        case "show": try arguments(1, "NOTE [--markdown | --xml]"); try await show(options.positional[0], options)
         case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-]"); try await edit(options.positional[0], options)
         case "mkdir": try arguments(1, "PATH"); try await mkdir(options.positional[0], options)
         case "trash", "restore", "delete": try arguments(1, "NOTE"); try await change(command, options.positional[0], options)
@@ -381,6 +382,7 @@ enum CommandLineTool {
         if options.json {
             var value = describe(record, library: library)
             value["title"] = document.title; value["body"] = document.body
+            if options.flags.contains("markdown") { value["markdown"] = document.markdownBody }
             value["attachments"] = document.assets.filter { !$0.isInternal }.map { ["id": $0.id, "name": $0.fileName] }
             value["drawingPages"] = document.drawingPages.count
             value["editable"] = editIssue(document) == nil
@@ -389,7 +391,7 @@ enum CommandLineTool {
         }
         print(document.title.isEmpty ? record.title : document.title)
         print(String(repeating: "─", count: 40))
-        print(document.body)
+        print(options.flags.contains("markdown") ? document.markdownBody : document.body)
         let attachments = document.assets.filter { !$0.isInternal }
         if !attachments.isEmpty || !document.drawingPages.isEmpty {
             print(String(repeating: "─", count: 40))

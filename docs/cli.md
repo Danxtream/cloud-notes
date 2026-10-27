@@ -30,7 +30,7 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | `scnotes list [--folder NAME\|PATH] [--trash] [--limit N]` | Notes, newest first: ID, date, title, folder path |
 | `scnotes folders` | Folder IDs and paths; subfolders appear as `Parent/Child`. Built-in folders such as Math notes are listed only while they hold notes, as on the phone |
 | `scnotes search QUERY` | Case-insensitive search of titles and full typed text |
-| `scnotes show NOTE [--xml]` | Title, text, attachment names and drawing page count; `--xml` prints the original cloud document |
+| `scnotes show NOTE [--markdown \| --xml]` | Title, text, attachment names and drawing page count; `--markdown` shows the text's formatting as Markdown-style text (see below), `--xml` prints the original cloud document |
 | `scnotes edit NOTE [--title TEXT] [--body TEXT \| --body-file PATH\|-]` | Replace the title and/or typed text and save to Samsung Cloud |
 | `scnotes new TITLE [--folder PATH] [--body TEXT \| --body-file PATH\|-]` | Create a text note in Samsung Cloud, built from the template |
 | `scnotes template NOTE` | Copy new notes' structure from NOTE instead of the automatically chosen note (kept only on this Mac) |
@@ -53,6 +53,8 @@ scnotes list --folder "Math notes" --json | jq -r '.[].title'
 scnotes show 1792424464 --json | jq '{title, editable, attachments}'
 printf 'Milk\nEggs\n' | scnotes edit "Shopping list" --body-file -
 ```
+
+`show --markdown` writes formatting as `**bold**`, `*italic*`, `~~strikethrough~~` and `<u>underline</u>`; lists as `- ` (bullets), `2. ` (numbers), `- [ ] ` / `- [x] ` (checkboxes) or the note's own label (`c. `, `iv. `, `③ `); and colour, size and highlight as `{color=#E51C23 size=20 highlight=#FFF59D}text{/}`. Samsung's default text colours and the note's most common size are left out. Literal `*`, `~`, `{`, `}` and `\` are escaped with a backslash. With `--json`, the same text is in the `markdown` field.
 
 ## Editing safely
 

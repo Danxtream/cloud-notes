@@ -97,6 +97,23 @@ enum SelfTest {
         inTrash.trashed = true; inTrash.trashedTime = 1_000_000_000_000
         guard inTrash.daysLeftInTrash(now: Date(timeIntervalSince1970: 1_000_000_000 + 2.5 * 86_400)) == 28,
               inTrash.daysLeftInTrash(now: Date(timeIntervalSince1970: 1_000_000_000 + 40 * 86_400)) == 0 else { throw NotesError.message("Trash days mismatch.") }
+        typealias Token = RichText.Token
+        let rich = RichText(items: [
+            .marker([Token(key: "paragraph/alignment", value: "0"), Token(key: "span/fontSize", value: "1,16.0"), Token(key: "span/foregroundColor", value: "1,-14342875")]),
+            .text("Plan *1*\n"), .marker([Token(key: "paragraph/bullet", value: "8,0")]), .text("dot\n"),
+            .marker([Token(key: "paragraph/bullet", value: nil), Token(key: "paragraph/bullet", value: "4,2")]), .text("two\n"),
+            .marker([Token(key: "paragraph/bullet", value: nil), Token(key: "paragraph/bullet", value: "2,true")]), .text("done\n"),
+            .marker([Token(key: "paragraph/bullet", value: nil)]), .text("- "),
+            .marker([Token(key: "span/bold", value: "1,True"), Token(key: "span/foregroundColor", value: nil), Token(key: "span/foregroundColor", value: "1,-1762269")]), .text("red bold"),
+            .marker([Token(key: "span/bold", value: nil), Token(key: "span/fontSize", value: nil), Token(key: "span/fontSize", value: "3,20.0")]), .text(" big"),
+            .marker([Token(key: "span/fontSize", value: nil), Token(key: "span/foregroundColor", value: nil), Token(key: "paragraph/alignment", value: nil)])])
+        let oddSpacing = Data("<?a  'span/bold'='1,True'?>".utf8).base64EncodedString()
+        guard try RichText(encoded: rich.encoded) == rich, try RichText(encoded: StyledText.encode("Plain")).plain == "Plain",
+              rich.plain == "Plan *1*\ndot\ntwo\ndone\n- red bold big",
+              rich.markdown == "Plan \\*1\\*\n- dot\n2. two\n- [x] done\n\\- {color=#E51C23}**red bold**{/} {color=#E51C23 size=20}big{/}",
+              (try? RichText(encoded: oddSpacing)) == nil,
+              RichStyle.label((.roman, 4, false)) == "iv.", RichStyle.label((.letter, 28, false)) == "ab.", RichStyle.label((.circledNumber, 3, false)) == "③"
+        else { throw NotesError.message("Styled text mismatch.") }
         let inkFixture = Data(base64Encoded:"/////wQAAACgDwAADQAAAAAADQAAAAEIAEoAAAABAEIAAAABAAEMAgAAAAAAAAAkQAAAAAAAADRAAAAAAAAAPkAAAAAAAABEQAAAAD8AAEA/AAAAAAoAAAACAFY0Ev8AAEBA")!
         let ink = try InkStroke(inkFixture)
         guard ink.points.count == 2, ink.points[1] == CGPoint(x: 30, y: 40), ink.color == 0xff123456 else { throw NotesError.message("Drawing coordinates or color mismatch.") }
