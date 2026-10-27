@@ -31,7 +31,7 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | `scnotes folders` | Folder IDs and paths; subfolders appear as `Parent/Child`. Built-in folders such as Math notes are listed only while they hold notes, as on the phone |
 | `scnotes search QUERY` | Case-insensitive search of titles and full typed text |
 | `scnotes show NOTE [--markdown \| --xml]` | Title, text, attachment names and drawing page count; `--markdown` shows the text's formatting as Markdown-style text (see below), `--xml` prints the original cloud document |
-| `scnotes edit NOTE [--title TEXT] [--body TEXT \| --body-file PATH\|-]` | Replace the title and/or typed text and save to Samsung Cloud |
+| `scnotes edit NOTE [--title TEXT] [--body TEXT \| --body-file PATH\|-] [--markdown]` | Replace the title and/or typed text and save to Samsung Cloud; with `--markdown` the text is Markdown-style and formatting is kept |
 | `scnotes new TITLE [--folder PATH] [--body TEXT \| --body-file PATH\|-]` | Create a text note in Samsung Cloud, built from the template |
 | `scnotes template NOTE` | Copy new notes' structure from NOTE instead of the automatically chosen note (kept only on this Mac) |
 | `scnotes favorite NOTE` / `unfavorite NOTE` | Star or unstar a note (Favorites in Samsung Notes); its text is unchanged |
@@ -56,13 +56,15 @@ printf 'Milk\nEggs\n' | scnotes edit "Shopping list" --body-file -
 
 `show --markdown` writes formatting as `**bold**`, `*italic*`, `~~strikethrough~~` and `<u>underline</u>`; lists as `- ` (bullets), `2. ` (numbers), `- [ ] ` / `- [x] ` (checkboxes) or the note's own label (`c. `, `iv. `, `③ `); and colour, size and highlight as `{color=#E51C23 size=20 highlight=#FFF59D}text{/}`. Samsung's default text colours and the note's most common size are left out. Literal `*`, `~`, `{`, `}` and `\` are escaped with a backslash. With `--json`, the same text is in the `markdown` field.
 
+`edit --markdown` takes the same form: lines left exactly as `show --markdown` printed them keep their formatting byte for byte, and changed or new lines get the markup they carry on the note's usual size and colour. Without `--markdown`, the text is saved plain.
+
 ## Editing safely
 
 `edit` follows the app's save path exactly: it downloads the current revision, refuses locked/encrypted notes and unsupported text, stores a pre-save backup under `Backups/`, uploads, then downloads again and verifies the title and text. If the note changed elsewhere in between, the save is refused.
 
 If the app holds an unsaved draft for the same note, `edit` stops rather than overwrite it. Save or reload the note in the app, or pass `--discard-draft`; the draft is archived under `DraftHistory/` either way.
 
-The same limits as the app apply: editing replaces formatting in the main text object, drawings and attachments are retained, and notes are deleted the way Samsung Notes does it: first to the Trash (`trash`), then for good from the Trash only (`delete`). `new` creates plain-text notes only. Their page structure is copied from the simplest plain-text note in the cache (one page, no attachments or drawings); its title, text and span data are never reused. `mkdir` creates folders only; it does not rename, move or delete them.
+The same limits as the app apply: plain-text editing replaces formatting in the main text object (`--markdown` and the app's editor keep it), drawings and attachments are retained, and notes are deleted the way Samsung Notes does it: first to the Trash (`trash`), then for good from the Trash only (`delete`). `new` creates plain-text notes only. Their page structure is copied from the simplest plain-text note in the cache (one page, no attachments or drawings); its title, text and span data are never reused. `mkdir` creates folders only; it does not rename, move or delete them.
 
 ## Diagnostics
 

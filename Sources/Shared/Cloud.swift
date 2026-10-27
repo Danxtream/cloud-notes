@@ -207,11 +207,17 @@ final class CloudDocument {
     /// Whether the note is starred; Samsung Notes keeps this on the note itself (`attributes/@isFavorite`).
     var isFavorite: Bool { resource.first("attributes")?.attr("isFavorite").lowercased() == "true" }
     /// The body's formatting as downloaded, or nil when there is no body or its styling cannot be read.
-    var richBody: RichText? { bodyObject.flatMap { try? RichText(encoded: $0.value("text")) } }
+    lazy var richBody: RichText? = bodyObject.flatMap { try? RichText(encoded: $0.value("text")) }
+    /// The body's runs as the editor works with them (see `RichText.numbered`), or nil without readable formatting.
+    /// Worked out once: change checks compare against it on every redraw.
+    lazy var styledBody: [RichRun]? = richBody.map { RichText.numbered($0.styledRuns) }
+    /// The runs the last `uploadXML` wrote into the body, for checking Samsung's readback.
+    private(set) var uploadedStyledBody: [RichRun]?
     /// The body as Markdown-style text (see `RichText.markdown`), or as plain text when its formatting cannot be read.
     var markdownBody: String { richBody?.markdown ?? body }
-    /// The note to upload with a new title and text, and with its star changed when `favorite` is given.
-    func uploadXML(title newTitle: String, body newBody: String, favorite: Bool? = nil, now: Date = Date()) throws -> Data {
+    /// The note to upload with a new title and text, and with its star changed when `favorite` is given. `styled` is the
+    /// new text with its formatting; it is written when its text is `newBody`, otherwise the text is written plain.
+    func uploadXML(title newTitle: String, body newBody: String, styled: [RichRun]? = nil, favorite: Bool? = nil, now: Date = Date()) throws -> Data {
         if let textIssue { throw NotesError.message(textIssue) }
         if let favorite { resource.first("attributes")?.set("isFavorite", favorite ? "true" : "false") }
         if resource.attr("isEncrypted") == "true" || resource.attr("isLocked") == "true" {
@@ -224,12 +230,17 @@ final class CloudDocument {
         if let object = titleObject, Int32(object.attr("timeStamp")) == nil, !object.attr("timeStamp").isEmpty {
             object.set("timeStamp", "0"); object.set("modifiedTime", String(Int64(now.timeIntervalSince1970 * 1_000_000))); object.set("hash", hash(object.bytes))
         }
-        if body != newBody {
+        let styled = styled.flatMap { !newBody.isEmpty && $0.map(\.text).joined() == newBody ? $0 : nil }
+        if body != newBody || (styled != nil && styled != styledBody) {
             guard let object = bodyObject, let text = object.first("text"),
                   let tree = resource.first("noteTree")?.first("bodyText") else {
                 throw NotesError.message("This note has no supported typed-text body. Its drawings are retained in the original document.")
             }
-            text.stringValue = StyledText.encode(newBody)
+            if let styled {
+                let written = RichText(runs: styled, defaults: richBody?.commonStyles ?? RichText.defaultStyles)
+                text.stringValue = written.encoded
+                uploadedStyledBody = RichText.numbered(written.styledRuns)
+            } else { text.stringValue = StyledText.encode(newBody) }
             Self.dropSpanOrder(object)
             updateObject(object, tree: tree, now: now)
         }
@@ -637,17 +648,18 @@ final class CloudClient {
     /// Why a save was refused because the note has a newer revision in Samsung Cloud.
     static let changedElsewhere = "This note changed on another device. Your draft is saved locally; reload the cloud copy before saving again."
     /// Saves a new title and text (and, when `favorite` is given, the note's star), then reads the note back to verify.
-    func save(_ document: CloudDocument, title: String, body: String, favorite: Bool? = nil) async throws -> CloudDocument {
+    func save(_ document: CloudDocument, title: String, body: String, styled: [RichRun]? = nil, favorite: Bool? = nil) async throws -> CloudDocument {
         let remoteCommit = try await currentCommit(document.serverID)
         guard remoteCommit == document.commit else { throw NotesError.message(Self.changedElsewhere) }
         try LocalStore.backup(document)
-        let xml = try document.uploadXML(title: title, body: body, favorite: favorite)
+        let xml = try document.uploadXML(title: title, body: body, styled: styled, favorite: favorite)
         let boundary = "SamsungNotesMac-" + UUID().uuidString
         var payload = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"noteResource\"\r\nContent-Type: application/xml\r\n\r\n".utf8)
         payload.append(xml); payload.append(Data("\r\n--\(boundary)--\r\n".utf8))
         _ = try await request("/samsungnotes/v1/notes/\(document.serverID)/update", method: "POST", body: payload, contentType: "multipart/form-data; boundary=\(boundary)")
         let fresh = try await download(document.serverID)
-        guard fresh.body == body, fresh.title == title, favorite.map({ fresh.isFavorite == $0 }) ?? true else { throw NotesError.message("Samsung accepted the upload, but its readback differs from the draft. The local draft and backup are retained.") }
+        guard fresh.body == body, fresh.title == title, favorite.map({ fresh.isFavorite == $0 }) ?? true,
+              document.uploadedStyledBody.map({ $0 == fresh.styledBody }) ?? true else { throw NotesError.message("Samsung accepted the upload, but its readback differs from the draft. The local draft and backup are retained.") }
         return fresh
     }
     func downloadAsset(_ asset: AssetRecord) async throws -> Data {
@@ -709,8 +721,11 @@ enum LocalStore {
         if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close() }
         else { try? Data(line.utf8).write(to: url, options: [.atomic]); try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
     }
-    static func writeDraft(id: String, title: String, body: String, commit: String) throws {
-        let data = try JSONSerialization.data(withJSONObject: ["title": title, "body": body, "commit": commit])
+    /// Keeps an unsaved title and text; `styled` is the text's formatting as Samsung's `<text>` value.
+    static func writeDraft(id: String, title: String, body: String, commit: String, styled: String? = nil) throws {
+        var values = ["title": title, "body": body, "commit": commit]
+        if let styled { values["styled"] = styled }
+        let data = try JSONSerialization.data(withJSONObject: values)
         let url = try directory("Drafts").appendingPathComponent(id + ".json")
         try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)

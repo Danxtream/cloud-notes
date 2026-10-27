@@ -13,6 +13,9 @@ import Combine
     @Published var search = ""
     @Published var title = ""
     @Published var body = ""
+    /// The open note's text with its formatting, kept in step with `body` by an editor that shows formatting; nil
+    /// when the note's formatting cannot be read. A plain-text editor leaves it behind, and its text is saved plain.
+    @Published var styledBody: [RichRun]?
     @Published var status = "Connect your Samsung account to load your notes."
     @Published var busy = false
     @Published var draftConflict = false
@@ -41,7 +44,9 @@ import Combine
     private var draftTask: Task<Void, Never>?
     /// Opens the newest note after loading. Compact layouts navigate on selection, so they opt out.
     var autoSelectFirst = true
-    var dirty: Bool { document.map { $0.title != title || $0.body != body } ?? false }
+    var dirty: Bool { document.map { $0.title != title || $0.body != body || (styledBody != nil && styledBody != $0.styledBody) } ?? false }
+    /// `styledBody` as a draft stores it.
+    private var styledDraft: String? { styledBody.map { RichText(runs: $0, defaults: document?.richBody?.commonStyles ?? RichText.defaultStyles).encoded } }
     var visibleNotes: [NoteRecord] {
         notes.filter { note in
             let inFolder = folder == "all" ? !note.trashed : folder == "trash" ? note.trashed
@@ -90,7 +95,7 @@ import Combine
         guard !busy else { return }
         do {
             if let document, dirty, !draftConflict {
-                try LocalStore.writeDraft(id: document.serverID, title: title, body: body, commit: document.commit)
+                try LocalStore.writeDraft(id: document.serverID, title: title, body: body, commit: document.commit, styled: styledDraft)
             }
             try SamsungSignIn.shared.signOut()
             generation += 1
@@ -98,7 +103,7 @@ import Combine
             transientSession = nil
             client = nil; cache = nil; loaded = [:]
             document = nil; selection = nil; notes = []; folders = []
-            title = ""; body = ""; account = ""; folder = "all"; search = ""
+            title = ""; body = ""; styledBody = nil; account = ""; folder = "all"; search = ""
             draftConflict = false; downloadedNotes = 0
             pendingConnection = nil; importCode = ""; error = nil
             status = "Signed out. Sign in with Samsung to load your notes."
@@ -215,7 +220,7 @@ import Combine
             let base = isOpen ? document! : try await client.download(id)
             if !isOpen { loaded[id] = base }
             starChanges[id] = on
-            await upload(base, title: isOpen ? title : base.title, body: isOpen ? body : base.body)
+            await upload(base, title: isOpen ? title : base.title, body: isOpen ? body : base.body, styled: isOpen ? styledBody : nil)
             if starChanges[id] == nil { status = on ? "Added to Favorites." : "Removed from Favorites." }
         } catch { self.error = error.localizedDescription }
     }
@@ -245,8 +250,8 @@ import Combine
         preserveDraft()
         // Save the note being left in the background so the next one opens at once.
         if let document, dirty, !draftConflict {
-            let title = self.title, body = self.body
-            Task { await upload(document, title: title, body: body) }
+            let title = self.title, body = self.body, styled = styledBody
+            Task { await upload(document, title: title, body: body, styled: styled) }
         }
         if let id { await open(id) } else { document = nil }
     }
@@ -261,7 +266,7 @@ import Combine
                 if let record = notes.first(where: { $0.id == id }) { try cache?.save(doc, revision: record.commit) }
             }
             guard generation == taskGeneration, selection == id else { return }
-            document = doc; title = doc.title; body = doc.body; draftConflict = false
+            document = doc; title = doc.title; body = doc.body; styledBody = doc.styledBody; draftConflict = false
             if force {
                 try LocalStore.archiveDraft(id: id)
                 try LocalStore.writeDraft(id: id, title: doc.title, body: doc.body, commit: doc.commit)
@@ -269,8 +274,10 @@ import Combine
             if !force, let draftURL = try? LocalStore.directory("Drafts").appendingPathComponent(id + ".json"),
                let draft = try? Data(contentsOf: draftURL),
                let values = try? JSONSerialization.jsonObject(with: draft) as? [String: String],
-               let draftTitle = values["title"], let draftBody = values["body"], (draftBody != doc.body || draftTitle != doc.title) {
+               let draftTitle = values["title"], let draftBody = values["body"],
+               draftBody != doc.body || draftTitle != doc.title || (values["styled"] != nil && values["styled"] != doc.bodyObject?.value("text")) {
                 title = draftTitle; body = draftBody
+                styledBody = values["styled"].flatMap { try? RichText(encoded: $0) }.map { RichText.numbered($0.styledRuns) }
                 draftConflict = values["commit"] != doc.commit
                 status = draftConflict ? "Draft is based on an older revision. Reload to archive it and use the cloud copy." : "Recovered unsaved changes; saving them to Samsung Cloud."
             }
@@ -281,7 +288,7 @@ import Combine
     }
     func preserveDraft() {
         guard let document, dirty, !draftConflict else { return }
-        do { try LocalStore.writeDraft(id: document.serverID, title: title, body: body, commit: document.commit) }
+        do { try LocalStore.writeDraft(id: document.serverID, title: title, body: body, commit: document.commit, styled: styledDraft) }
         catch { self.error = "Could not save your local draft: " + error.localizedDescription }
     }
     func scheduleDraft() {
@@ -317,28 +324,28 @@ import Combine
         if busy { scheduleAutosave(); return }
         autosaveTask?.cancel(); unsavedSince = nil
         preserveDraft()
-        await upload(document, title: title, body: body)
+        await upload(document, title: title, body: body, styled: styledBody)
     }
     /// Saves `title` and `body` of `document`, one upload per note at a time: a second upload from the same revision
     /// would be refused as a conflict, so text that arrives during an upload is queued and sent from the fresh revision.
-    private func upload(_ document: CloudDocument, title: String, body: String) async {
+    private func upload(_ document: CloudDocument, title: String, body: String, styled: [RichRun]?) async {
         let id = document.serverID
-        guard !uploading.contains(id) else { queued[id] = (title, body); return }
+        guard !uploading.contains(id) else { queued[id] = (title, body, styled); return }
         uploading.insert(id); defer { uploading.remove(id) }
-        var base = document, nextTitle = title, nextBody = body
-        while let fresh = await uploadOnce(base, title: nextTitle, body: nextBody), let next = queued.removeValue(forKey: id),
-              next.title != fresh.title || next.body != fresh.body || starChanges[id] != nil {
-            base = fresh; nextTitle = next.title; nextBody = next.body
+        var base = document, nextTitle = title, nextBody = body, nextStyled = styled
+        while let fresh = await uploadOnce(base, title: nextTitle, body: nextBody, styled: nextStyled), let next = queued.removeValue(forKey: id),
+              next.title != fresh.title || next.body != fresh.body || (next.styled != nil && next.styled != fresh.styledBody) || starChanges[id] != nil {
+            base = fresh; nextTitle = next.title; nextBody = next.body; nextStyled = next.styled
         }
         queued[id] = nil
     }
     private var uploading: Set<String> = []
-    private var queued: [String: (title: String, body: String)] = [:]
+    private var queued: [String: (title: String, body: String, styled: [RichRun]?)] = [:]
     /// Star changes waiting to go up with the note's next save.
     private var starChanges: [String: Bool] = [:]
     /// One verified save. Typing that happened meanwhile is kept and saved next; a note changed on another device stops
     /// autosave and keeps the local draft. Returns the saved document, or nil when the save failed.
-    private func uploadOnce(_ document: CloudDocument, title savedTitle: String, body savedBody: String) async -> CloudDocument? {
+    private func uploadOnce(_ document: CloudDocument, title savedTitle: String, body savedBody: String, styled: [RichRun]?) async -> CloudDocument? {
         guard let client else { return nil }
         let id = document.serverID
         savesInFlight += 1; saveError = nil
@@ -347,14 +354,14 @@ import Combine
             // Use a fresh object so a failed upload cannot mutate the displayed baseline.
             let copy = try CloudDocument(serverID: id, data: document.original)
             let star = starChanges[id]
-            let fresh = try await client.save(copy, title: savedTitle, body: savedBody, favorite: star)
+            let fresh = try await client.save(copy, title: savedTitle, body: savedBody, styled: styled, favorite: star)
             if star != nil, starChanges[id] == star { starChanges[id] = nil }
             loaded[id] = fresh
             if let i = notes.firstIndex(where: { $0.id == id }) {
                 notes[i].commit = fresh.commit
                 try cache?.save(fresh, revision: fresh.commit)
             }
-            try LocalStore.writeDraft(id: id, title: savedTitle, body: savedBody, commit: fresh.commit)
+            try LocalStore.writeDraft(id: id, title: savedTitle, body: savedBody, commit: fresh.commit, styled: fresh.bodyObject?.value("text"))
             if selection == id { self.document = fresh }
             if let i = notes.firstIndex(where: { $0.id == id }) { describe(i, document: fresh) }
             try cache?.saveIndex(CloudIndex(notes: notes, folders: folders))

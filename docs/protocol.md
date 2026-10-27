@@ -54,6 +54,17 @@ The object's `text` field is base64-encoded UTF-8. Its decoded contents combine 
 
 The client retains the original XML. When editing a supported text object, it replaces that object's styled text, updates its modification/hash fields and the corresponding tree entry, and preserves the remaining resource.
 
+### Styled text
+
+Checked against every text object of a 44-note account and notes formatted in Samsung Notes 4.4.45 on a phone:
+
+- A marker holds tokens separated by one space: `'group/key'='value'` opens a style where the marker stands, a bare `'group/key'` closes it. A key is never opened while open, and every key is closed by the end. Positions are UTF-16 offsets. Markers are `<?a …?>` with standard Base64 runs between them and no whitespace, so the stream has one canonical form; the client re-encodes every observed note byte for byte.
+- Span styles (`span/…`) have values `flag,property`, where the flag is Samsung's span expansion flag (1 or 3; 2 for links): `foregroundColor` and `backgroundColor` (signed ARGB integers; background 0 = none), `fontSize` (points, e.g. `16.0`), `bold`, `italic`, `underline`, `strikethrough` (`True`/`False`), `hyperText`, `fontName`, `timeStamp`.
+- Paragraph styles (`paragraph/…`) are closed and reopened at every paragraph: `alignment` (0 = left), `parsingState` (`True`/`False`), and `bullet` = `type,number[,{levels}]` with types 0 none, 1 arrow, 2 checkbox (`2,true` = checked), 3 diamond, 4 number, 5 circled number, 6 lower-case letter, 7 roman numeral, 8 dot, 9 circle, 10 capital letter, 11 square, 12 white square. Samsung writes a line's newline with either its own or the next line's paragraph styles; a paragraph's styles are the ones at its first character.
+- `sectionData/sectionData` opens with the text's UTF-16 length and closes at the end, followed by `<?a 'sectionData/sectionData'='0' 'sectionData/sectionData'?>`.
+
+When it writes formatted text, the client follows the same pattern: the always-present styles (alignment, parsing state, size, colour) are filled in from the note's most common values, paragraph styles are closed and reopened after every newline, other styles are closed where they end or change, and span order data is removed as for plain text. The readback must give the same runs.
+
 ### Text Samsung devices can open
 
 A cloud readback is not enough: Samsung Notes on a phone parses every downloaded note with its S Pen SDK and silently skips notes it cannot parse (its log shows `fail to createLocalNote` and `Spen SDK can't parse a xml note`). Checked against Samsung Notes 4.4.45 on a Galaxy S23+ with `adb logcat` (tags `SENL$SC/...`):

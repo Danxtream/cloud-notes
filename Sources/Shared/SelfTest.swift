@@ -114,6 +114,25 @@ enum SelfTest {
               (try? RichText(encoded: oddSpacing)) == nil,
               RichStyle.label((.roman, 4, false)) == "iv.", RichStyle.label((.letter, 28, false)) == "ab.", RichStyle.label((.circledNumber, 3, false)) == "③"
         else { throw NotesError.message("Styled text mismatch.") }
+        // Written back from runs, the styles survive, every style is closed, and plain text matches StyledText.encode.
+        let rebuilt = RichText(runs: rich.styledRuns)
+        var rebuiltOpen: [String: Int] = [:]
+        for case .marker(let tokens) in rebuilt.items { for token in tokens { rebuiltOpen[token.key, default: 0] += token.value == nil ? -1 : 1 } }
+        guard rebuilt.styledRuns.map(\.text) == rich.styledRuns.map(\.text),
+              zip(rebuilt.styledRuns, rich.styledRuns).allSatisfy({ $0.styles.merging(RichText.defaultStyles) { a, _ in a } == $1.styles.merging(RichText.defaultStyles) { a, _ in a } }),
+              rebuiltOpen.values.allSatisfy({ $0 == 0 }), try RichText(encoded: rebuilt.encoded) == rebuilt,
+              RichText(runs: [RichRun(text: "Plain", styles: [:])]).encoded == StyledText.encode("Plain")
+        else { throw NotesError.message("Styled text rebuild mismatch.") }
+        // Markdown-style edits: unchanged lines keep their exact styles, changed and new lines take their markup.
+        let edited = rich.runs(fromMarkdown: rich.markdown.replacingOccurrences(of: "2. two", with: "2. **two** {color=#43A047 size=24}green{/}") + "\n- [ ] new \\*")
+        let green = edited.first { $0.text.hasPrefix("green") }
+        guard rich.runs(fromMarkdown: rich.markdown) == RichText.numbered(rich.styledRuns),
+              edited.map(\.text).joined() == "Plan *1*\ndot\ntwo green\ndone\n- red bold big\nnew *",
+              edited.first == RichText.numbered(rich.styledRuns).first,
+              edited.first(where: { $0.text == "two" })?.styles["span/bold"] == "1,True",
+              green?.styles["span/foregroundColor"] == "1,-12345273", green?.styles["span/fontSize"] == "1,24.0",
+              edited.last?.styles["paragraph/bullet"] == "2,false"
+        else { throw NotesError.message("Markdown-style edit mismatch.") }
         let inkFixture = Data(base64Encoded:"/////wQAAACgDwAADQAAAAAADQAAAAEIAEoAAAABAEIAAAABAAEMAgAAAAAAAAAkQAAAAAAAADRAAAAAAAAAPkAAAAAAAABEQAAAAD8AAEA/AAAAAAoAAAACAFY0Ev8AAEBA")!
         let ink = try InkStroke(inkFixture)
         guard ink.points.count == 2, ink.points[1] == CGPoint(x: 30, y: 40), ink.color == 0xff123456 else { throw NotesError.message("Drawing coordinates or color mismatch.") }

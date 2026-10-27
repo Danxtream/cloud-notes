@@ -26,8 +26,9 @@ enum CommandLineTool {
                                      Markdown-style text, or the original XML
 
     Changes
-      edit NOTE [--title TEXT] [--body TEXT | --body-file PATH|-] [--discard-draft]
-                                     Replace title and/or typed text, then save to Samsung Cloud
+      edit NOTE [--title TEXT] [--body TEXT | --body-file PATH|-] [--markdown] [--discard-draft]
+                                     Replace title and/or typed text, then save to Samsung Cloud;
+                                     with --markdown the text is Markdown-style and formatting is kept
       new TITLE [--folder PATH] [--body TEXT | --body-file PATH|-]
                                      Create a text note in Samsung Cloud from the template
       template NOTE                  Copy new notes' structure from NOTE instead of the automatic choice
@@ -128,7 +129,7 @@ enum CommandLineTool {
             else { for folder in folders.sorted(by: { folders.path(of: $0.id).localizedStandardCompare(folders.path(of: $1.id)) == .orderedAscending }) { print("\(folder.id)\t\(folders.path(of: folder.id))") } }
         case "search": try arguments(1, "QUERY"); try await search(options.positional[0], options)
         case "show": try arguments(1, "NOTE [--markdown | --xml]"); try await show(options.positional[0], options)
-        case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-]"); try await edit(options.positional[0], options)
+        case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-] [--markdown]"); try await edit(options.positional[0], options)
         case "mkdir": try arguments(1, "PATH"); try await mkdir(options.positional[0], options)
         case "trash", "restore", "delete": try arguments(1, "NOTE"); try await change(command, options.positional[0], options)
         case "favorite", "unfavorite": try arguments(1, "NOTE"); try await star(command == "favorite", options.positional[0], options)
@@ -424,9 +425,15 @@ enum CommandLineTool {
         guard !record.trashed else { throw Failure(message: "Restore this note from the trash on a Samsung device before editing it.") }
         let document = try await library.client.download(record.id)
         if let issue = editIssue(document) { throw Failure(message: issue) }
+        var styled: [RichRun]?
+        if options.flags.contains("markdown"), let markdown = newBody {
+            guard let rich = document.richBody else { throw Failure(message: "This note's formatting cannot be read, so it cannot be edited as Markdown-style text.") }
+            styled = rich.runs(fromMarkdown: markdown)
+            newBody = styled?.map(\.text).joined()
+        }
         let title = newTitle ?? document.title, body = newBody ?? document.body
         if body != document.body && document.bodyObject == nil { throw Failure(message: "This note has no supported typed-text body.") }
-        guard title != document.title || body != document.body else { print("No changes; the cloud copy already matches."); return }
+        guard title != document.title || body != document.body || (styled != nil && styled != document.styledBody) else { print("No changes; the cloud copy already matches."); return }
         // Never overwrite an unsaved draft from the window app without consent.
         let draftURL = try LocalStore.directory("Drafts").appendingPathComponent(record.id + ".json")
         if let data = try? Data(contentsOf: draftURL), let draft = try? JSONSerialization.jsonObject(with: data) as? [String: String],
@@ -434,12 +441,12 @@ enum CommandLineTool {
             guard options.flags.contains("discard-draft") else { throw Failure(message: "This note has an unsaved draft in the app. Save or reload it there, or pass --discard-draft to archive it and continue.") }
         }
         try LocalStore.archiveDraft(id: record.id)
-        let fresh = try await library.client.save(document, title: title, body: body)
+        let fresh = try await library.client.save(document, title: title, body: body, styled: styled)
         try library.cache.save(fresh, revision: fresh.commit)
         var index = library.index
         if let position = index.notes.firstIndex(where: { $0.id == record.id }) { index.notes[position].commit = fresh.commit; index.notes[position].describe(fresh) }
         try library.cache.saveIndex(index)
-        try LocalStore.writeDraft(id: record.id, title: fresh.title, body: fresh.body, commit: fresh.commit)
+        try LocalStore.writeDraft(id: record.id, title: fresh.title, body: fresh.body, commit: fresh.commit, styled: fresh.bodyObject?.value("text"))
         print("Saved \"\(fresh.title.isEmpty ? record.title : fresh.title)\" to Samsung Cloud and verified the readback. A pre-save backup is in \(LocalStore.root.appendingPathComponent("Backups").path).")
     }
 

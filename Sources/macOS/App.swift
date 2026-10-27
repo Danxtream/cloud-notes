@@ -62,6 +62,7 @@ extension NotesModel {
 
 struct NotesView: View {
     @StateObject var model = NotesModel()
+    @StateObject var formatting = RichTextController()
     @State var importing = false
     @State var showDrawing = false
     @State var creatingFolder = false
@@ -114,6 +115,7 @@ struct NotesView: View {
         .onChange(of: model.selection) { value in Task { await model.select(value) } }
         .onChange(of: model.title) { _ in model.edited() }
         .onChange(of: model.body) { _ in model.edited() }
+        .onChange(of: model.styledBody) { _ in model.edited() }
         .onChange(of: model.document?.serverID) { _ in showDrawing = model.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !(model.document?.drawingPages.isEmpty ?? true) }
         .onChange(of: model.folder) { _ in model.preserveDraft(); model.selection = model.visibleNotes.first?.id }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.preserveDraft() }
@@ -253,6 +255,42 @@ struct NotesView: View {
         }
         .navigationSplitViewColumnWidth(min: 200, ideal: 260)
     }
+    /// Bold, italic, underline, strikethrough, colour, highlight, size and lists for the open note's text, with
+    /// Samsung Notes' colours. Applies to the selection, or to what is typed next. Its three groups wrap onto more
+    /// rows in a narrow window.
+    var formatBar: some View {
+        FlowLayout(spacing: 16, rowSpacing: 6) {
+            HStack(spacing: 8) {
+                Button { formatting.toggle("span/bold") } label: { Image(systemName: "bold") }.keyboardShortcut("b").help("Bold (⌘B)")
+                Button { formatting.toggle("span/italic") } label: { Image(systemName: "italic") }.keyboardShortcut("i").help("Italic (⌘I)")
+                Button { formatting.toggle("span/underline") } label: { Image(systemName: "underline") }.keyboardShortcut("u").help("Underline (⌘U)")
+                Button { formatting.toggle("span/strikethrough") } label: { Image(systemName: "strikethrough") }.keyboardShortcut("x", modifiers: [.command, .shift]).help("Strikethrough (⇧⌘X)")
+            }
+            HStack(spacing: 8) {
+                Menu {
+                    Button("Default") { formatting.setColor(nil) }
+                    ForEach(Self.textColors, id: \.name) { color in Button(color.name) { formatting.setColor(color.argb) } }
+                } label: { Image(systemName: "paintpalette") }.menuIndicator(.hidden).fixedSize().help("Text colour")
+                Menu {
+                    Button("None") { formatting.setHighlight(nil) }
+                    ForEach(Self.highlights, id: \.name) { color in Button(color.name) { formatting.setHighlight(color.argb) } }
+                } label: { Image(systemName: "highlighter") }.menuIndicator(.hidden).fixedSize().help("Highlight")
+                Menu {
+                    ForEach([("Small", 12.0), ("Normal", 16.0), ("Large", 20.0), ("Larger", 24.0), ("Huge", 32.0)], id: \.0) { name, size in
+                        Button(name) { formatting.setSize(size) }
+                    }
+                } label: { Image(systemName: "textformat.size") }.menuIndicator(.hidden).fixedSize().help("Text size")
+            }
+            HStack(spacing: 8) {
+                Button { formatting.setList(.dot) } label: { Image(systemName: "list.bullet") }.help("Bulleted list")
+                Button { formatting.setList(.number) } label: { Image(systemName: "list.number") }.help("Numbered list")
+                Button { formatting.setList(.checkbox) } label: { Image(systemName: "checklist") }.help("Checklist")
+            }
+        }.buttonStyle(.borderless).padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
+    }
+    static let textColors: [(name: String, argb: UInt32)] = [("Red", 0xFFE5_3935), ("Orange", 0xFFFB_8C00), ("Green", 0xFF43_A047),
+                                                             ("Blue", 0xFF1E_88E5), ("Purple", 0xFF8E_24AA), ("Grey", 0xFF75_7575)]
+    static let highlights: [(name: String, argb: UInt32)] = [("Yellow", 0xFFFF_F59D), ("Green", 0xFFC5_E1A5), ("Blue", 0xFF90_CAF9), ("Pink", 0xFFF4_8FB1)]
     /// The open note (editable preview, or the whole window when opened fully), or the welcome view.
     @ViewBuilder var detailPane: some View {
         if let document = model.document {
@@ -268,7 +306,13 @@ struct NotesView: View {
                     }.padding(10)
                 }
                 if showDrawing && !document.drawingPages.isEmpty { DrawingPreview(pages: document.drawingPages) }
-                else {
+                else if model.styledBody != nil, document.bodyObject != nil {
+                    if model.editable { formatBar.disabled(model.busy); Divider() }
+                    RichTextEditor(noteID: document.serverID, runs: Binding(get: { model.styledBody ?? [] }, set: { model.styledBody = $0 }), text: $model.body,
+                                   editable: model.editable && !model.busy,
+                                   defaults: document.body.isEmpty ? RichText.typingStyles : document.richBody?.commonStyles ?? RichText.typingStyles,
+                                   controller: formatting)
+                } else {
                     TextEditor(text: $model.body).font(.system(size: 15)).padding(10)
                         .disabled(!model.editable || model.busy || document.bodyObject == nil)
                 }
@@ -288,7 +332,8 @@ struct NotesView: View {
                     Text(model.saveStatus).foregroundStyle(model.saveError != nil || model.draftConflict ? .orange : .secondary).lineLimit(1)
                     if model.saveError != nil { Button("Retry") { Task { await model.save() } }.controlSize(.small) }
                     Spacer()
-                    ViewThatFits { Text("Plain text editing · drawings and attachments retained"); Text("Plain text") }.foregroundStyle(.secondary)
+                    if model.styledBody != nil { ViewThatFits { Text("Formatting kept · drawings and attachments retained"); Text("Formatting kept") }.foregroundStyle(.secondary) }
+                    else { ViewThatFits { Text("Plain text editing · drawings and attachments retained"); Text("Plain text") }.foregroundStyle(.secondary) }
                 }.font(.caption).padding(10)
             }
         } else {
@@ -466,4 +511,42 @@ struct NotesView: View {
             }
     }
 
+}
+
+/// Lays its children out left to right and starts a new row when the next one does not fit.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 12
+    var rowSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        return CGSize(width: rows.map(\.width).max() ?? 0,
+                      height: rows.map(\.height).reduce(0, +) + rowSpacing * CGFloat(max(rows.count - 1, 0)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + rowSpacing
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [(indices: [Int], width: CGFloat, height: CGFloat)] {
+        var rows: [(indices: [Int], width: CGFloat, height: CGFloat)] = []
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if let last = rows.last, last.width + spacing + size.width <= width {
+                rows[rows.count - 1] = (last.indices + [index], last.width + spacing + size.width, max(last.height, size.height))
+            } else {
+                rows.append(([index], size.width, size.height))
+            }
+        }
+        return rows
+    }
 }
