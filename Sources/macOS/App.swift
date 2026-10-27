@@ -78,12 +78,20 @@ struct NotesView: View {
     @State var narrow = false
     var body: some View {
         VStack(spacing: 0) {
-        NavigationSplitView(columnVisibility: $columns) {
-            sidebarPane
-        } content: {
-            notesListPane
-        } detail: {
-            detailPane.navigationSplitViewColumnWidth(min: 240, ideal: 520)
+        Group {
+            // On macOS a three-column split view keeps its note list with .detailOnly, so the open note replaces the
+            // split view instead.
+            if noteFullView {
+                detailPane.navigationTitle("Samsung Cloud Notes")
+            } else {
+                NavigationSplitView(columnVisibility: $columns) {
+                    sidebarPane
+                } content: {
+                    notesListPane
+                } detail: {
+                    detailPane.navigationSplitViewColumnWidth(min: 240, ideal: 520)
+                }
+            }
         }
         .toolbar { windowToolbar }
         Divider()
@@ -202,6 +210,7 @@ struct NotesView: View {
     }
     /// The notes of the selected folder; click to preview, double-click to open fully.
     @ViewBuilder var notesListPane: some View {
+        ScrollViewReader { proxy in
         List(model.visibleNotes, selection: $model.selection) { note in
             VStack(alignment: .leading, spacing: 5) {
                 HStack { Text(note.locked ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
@@ -214,8 +223,11 @@ struct NotesView: View {
                     Text(Date(timeIntervalSince1970: note.modified / 1000), style: .date).font(.caption2).foregroundStyle(.secondary)
                 }
             }.padding(.vertical, 5).tag(note.id)
-            .simultaneousGesture(TapGesture(count: 2).onEnded { model.selection = note.id; openNoteFully() })
-            .contextMenu {
+        }
+        // The list's own double-click (and Return) action: a gesture on the rows would hold every single click back
+        // until the double-click interval passed, so selecting a note would lag.
+        .contextMenu(forSelectionType: String.self) { ids in
+            if ids.count == 1, let note = model.notes.first(where: { $0.id == ids.first }) {
                 if note.trashed {
                     Button("Restore") { Task { await model.change(note: note.id, .restore) } }
                     Button("Delete Forever…", role: .destructive) { pendingDelete = note.id }
@@ -224,6 +236,12 @@ struct NotesView: View {
                     Button("Move to Trash") { Task { await model.change(note: note.id, .trash) } }
                 }
             }
+        } primaryAction: { ids in
+            guard let id = ids.first else { return }
+            model.selection = id; openNoteFully()
+        }
+        // Going back from a fully open note builds the list anew; bring that note back into view once its rows are laid out.
+        .onAppear { if let id = model.selection { DispatchQueue.main.async { proxy.scrollTo(id, anchor: .center) } } }
         }
         .onDeleteCommand {
             guard let id = model.selection, let note = model.notes.first(where: { $0.id == id }) else { return }
@@ -348,7 +366,7 @@ struct NotesView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
-    func openNoteFully() { guard model.document != nil || model.selection != nil else { return }; noteFullView = true; columns = .detailOnly }
+    func openNoteFully() { guard model.document != nil || model.selection != nil else { return }; noteFullView = true }
     func showList() { noteFullView = false; columns = narrow ? .doubleColumn : .all }
     /// Hides the folder sidebar when the window gets narrow and shows it again when it widens; the sidebar button still works.
     func adapt(to width: CGFloat) {
