@@ -134,6 +134,11 @@ extension Array where Element == FolderRecord {
         }
         return nodes("")
     }
+    /// The folders Samsung Notes lists: its built-in folders (ids such as "math:///" for Math notes) only while a note
+    /// outside the Trash is in them, as the phone hides them when empty.
+    func listed(with notes: [NoteRecord]) -> [FolderRecord] {
+        filter { folder in !folder.id.contains(":///") || notes.contains { $0.folder == folder.id && !$0.trashed } }
+    }
     /// The folder's names from the top level down, joined with "/", for example "Dev/Repos".
     func path(of id: String) -> String {
         var names: [String] = [], current = id, seen: Set<String> = []

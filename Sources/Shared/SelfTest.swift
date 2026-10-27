@@ -31,6 +31,10 @@ enum SelfTest {
                       FolderRecord(id: "c", name: "Loop", parent: "d"), FolderRecord(id: "d", name: "Back", parent: "c"), FolderRecord(id: "e", name: "Orphan", parent: "gone")]
         guard nested.tree.map(\.id) == ["a", "c", "d", "e"], nested.tree[0].children?.map(\.id) == ["b"], nested.tree[1].children == nil,
               nested.path(of: "b") == "Dev/Repos", nested.path(of: "e") == "Orphan" else { throw NotesError.message("Folder tree mismatch.") }
+        var inMath = NoteRecord(id: "m", resourceID: "m", commit: "c", modified: 0, locked: false, encrypted: false); inMath.folder = "math:///"
+        let builtIn = [FolderRecord(id: "math:///", name: "Math notes", parent: "root"), FolderRecord(id: "screenOffMemo:///", name: "Screen off memo", parent: "root"), FolderRecord(id: "a", name: "Dev", parent: "root")]
+        var trashedMath = inMath; trashedMath.trashed = true
+        guard builtIn.listed(with: [inMath]).map(\.id) == ["math:///", "a"], builtIn.listed(with: [trashedMath]).map(\.id) == ["a"] else { throw NotesError.message("Built-in folder listing mismatch.") }
         let newFolder = try XMLDocument(data: CloudClient.newFolderXML(id: "f1", name: "Plans & <ideas> 📒", parent: "a", order: 3, latestSync: 42, now: 7), options: [.nodeLoadExternalEntitiesNever])
         guard let resource = newFolder.rootElement(), resource.name == "FolderResource", resource.value("syncModifiedTime") == "42",
               let node = resource.first("nodeList")?.first("node"), node.attr("id") == "f1", node.attr("type") == "folder",

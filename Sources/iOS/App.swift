@@ -138,7 +138,7 @@ struct NotesRootView: View {
             Label("All notes", systemImage: "doc.text").tag("all")
             if !model.folders.isEmpty {
                 Section("Folders") {
-                    OutlineGroup(model.folders.tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
+                    OutlineGroup(model.folders.listed(with: model.notes).tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
                 }
             }
             Label("Trash", systemImage: "trash").tag("trash")

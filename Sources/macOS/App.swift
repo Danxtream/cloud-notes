@@ -158,7 +158,7 @@ struct NotesView: View {
             Label("All notes", systemImage: "doc.text").tag("all")
             Label("Favorites", systemImage: "star").tag("favorites")
             Section {
-                OutlineGroup(model.folders.tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
+                OutlineGroup(model.folders.listed(with: model.notes).tree, children: \.children) { node in Label(node.folder.name, systemImage: "folder").tag(node.id) }
             } header: {
                 HStack {
                     Text("Folders")

@@ -122,7 +122,7 @@ enum CommandLineTool {
                 return
             }
             let library = try await Library.load(offline: options.offline)
-            let folders = library.index.folders
+            let folders = library.index.folders.listed(with: library.index.notes)
             if options.json { try printJSON(folders.map { ["id": $0.id, "name": $0.name, "parent": $0.parent, "path": folders.path(of: $0.id)] }) }
             else { for folder in folders.sorted(by: { folders.path(of: $0.id).localizedStandardCompare(folders.path(of: $1.id)) == .orderedAscending }) { print("\(folder.id)\t\(folders.path(of: folder.id))") } }
         case "search": try arguments(1, "QUERY"); try await search(options.positional[0], options)
