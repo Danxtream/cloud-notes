@@ -65,13 +65,33 @@ struct RichText: Equatable {
 
     var plain: String { items.map { if case .text(let text) = $0 { return text } else { return "" } }.joined() }
 
-    /// The text in pieces, each with the styles open over it (key → value). Pieces are split only where markers stand.
+    /// The text in pieces, each with the styles open over it (key → value), split where markers stand and after every
+    /// newline. Paragraph styles are the line's, as Samsung Notes reads them: a line has the paragraph styles open on the
+    /// newline before it (which ends the previous line, so it keeps that line's), the first line those opened first.
+    /// Earlier versions of this client opened them just after the newline of a line with text instead, which Samsung
+    /// never does; they are read as that line's too. (On an empty line that spot is the line's own newline, where
+    /// Samsung opens the next line's styles.)
     var runs: [(text: String, styles: [String: String])] {
-        var open: [String: String] = [:], runs: [(text: String, styles: [String: String])] = []
+        func paragraphStyles(_ styles: [String: String]) -> [String: String] { styles.filter { $0.key.hasPrefix("paragraph/") } }
+        var open: [String: String] = [:], line: [String: String]? = nil, afterNewline = false, opened: [String: String]? = nil
+        var runs: [(text: String, styles: [String: String])] = []
         for item in items {
             switch item {
-            case .marker(let tokens): for token in tokens { open[token.key] = token.value }
-            case .text(let text): runs.append((text, open))
+            case .marker(let tokens):
+                for token in tokens { open[token.key] = token.value }
+                if line == nil { line = paragraphStyles(open) }
+                else if afterNewline, tokens.contains(where: { $0.value != nil && $0.key.hasPrefix("paragraph/") }) { opened = paragraphStyles(open) }
+            case .text(let text):
+                if let opened, !text.hasPrefix("\n") { line = opened }
+                opened = nil
+                var rest = Substring(text)
+                while !rest.isEmpty {
+                    let end = rest.firstIndex(of: "\n").map { rest.index(after: $0) } ?? rest.endIndex
+                    runs.append((String(rest[..<end]), open.filter { !$0.key.hasPrefix("paragraph/") }.merging(line ?? [:]) { $1 }))
+                    afterNewline = rest[..<end].hasSuffix("\n")
+                    if afterNewline { line = paragraphStyles(open) }
+                    rest = rest[end...]
+                }
             }
         }
         return runs
@@ -367,24 +387,36 @@ extension RichText {
     /// styles are filled in from `defaults` where a run lacks them, paragraph styles are closed and reopened at every
     /// paragraph, other styles are closed where they end or change and opened where they start, and the text's length
     /// opens a `sectionData` that is closed at the end, as in `StyledText.encode`. Paragraph keys come before span keys.
+    ///
+    /// Samsung Notes finds each paragraph style's paragraph by where the style opens, which must be the start of the
+    /// text or the newline before its paragraph; anywhere else the phone cannot open the note ("Spen SDK can't parse a
+    /// xml note"). So each newline carries the paragraph styles of the line after it. A first line that is only a
+    /// newline gets its own paragraph styles opened and closed at the start, which Samsung reads as that line's.
     init(runs: [RichRun], defaults: [String: String] = RichText.defaultStyles) {
         func order(_ key: String) -> (Int, String) { (key.hasPrefix("paragraph/") ? 0 : key == Self.sectionKey ? 2 : 1, key) }
         let filled = runs.map { run in RichRun(text: run.text, styles: run.styles.merging(defaults) { own, _ in own }) }
-        var items: [Item] = [], open: [String: String] = [:], startsParagraph = true
-        for piece in Self.normalized(filled, split: true) {
+        let pieces = Self.normalized(filled, split: true)
+        var units: [(text: String, styles: [String: String], startsParagraph: Bool)] = []
+        for (index, piece) in pieces.enumerated() {
+            guard piece.text.hasSuffix("\n"), index + 1 < pieces.count else { units.append((piece.text, piece.styles, index == 0)); continue }
+            let line = String(piece.text.dropLast()), next = pieces[index + 1].styles.filter { $0.key.hasPrefix("paragraph/") }
+            if index == 0 || !line.isEmpty { units.append((line, piece.styles, index == 0)) }
+            units.append(("\n", piece.styles.filter { !$0.key.hasPrefix("paragraph/") }.merging(next) { $1 }, true))
+        }
+        var items: [Item] = [], open: [String: String] = [:]
+        for unit in units {
             var tokens: [Token] = []
             let closing = open.filter { key, value in
-                key != Self.sectionKey && ((startsParagraph && key.hasPrefix("paragraph/")) || piece.styles[key] != value)
+                key != Self.sectionKey && ((unit.startsParagraph && key.hasPrefix("paragraph/")) || unit.styles[key] != value)
             }.keys.sorted { order($0) < order($1) }
             for key in closing { tokens.append(Token(key: key, value: nil)); open[key] = nil }
-            for key in piece.styles.keys.sorted(by: { order($0) < order($1) }) where open[key] == nil {
-                tokens.append(Token(key: key, value: piece.styles[key])); open[key] = piece.styles[key]
+            for key in unit.styles.keys.sorted(by: { order($0) < order($1) }) where open[key] == nil {
+                tokens.append(Token(key: key, value: unit.styles[key])); open[key] = unit.styles[key]
             }
             if items.isEmpty { tokens.append(Token(key: Self.sectionKey, value: String(runs.map(\.text).joined().utf16.count))); open[Self.sectionKey] = "" }
-            if !tokens.isEmpty { items.append(.marker(tokens)); items.append(.text(piece.text)) }
-            else if case .text(let previous) = items.last { items[items.count - 1] = .text(previous + piece.text) }
-            else { items.append(.text(piece.text)) }
-            startsParagraph = piece.text.hasSuffix("\n")
+            if !tokens.isEmpty { items.append(.marker(tokens)); if !unit.text.isEmpty { items.append(.text(unit.text)) } }
+            else if case .text(let previous) = items.last { items[items.count - 1] = .text(previous + unit.text) }
+            else if !unit.text.isEmpty { items.append(.text(unit.text)) }
         }
         if !open.isEmpty {
             // As `StyledText.encode` ends: spans (last opened first), then paragraph styles, then the section.

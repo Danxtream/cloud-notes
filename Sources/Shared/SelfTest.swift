@@ -100,10 +100,10 @@ enum SelfTest {
         typealias Token = RichText.Token
         let rich = RichText(items: [
             .marker([Token(key: "paragraph/alignment", value: "0"), Token(key: "span/fontSize", value: "1,16.0"), Token(key: "span/foregroundColor", value: "1,-14342875")]),
-            .text("Plan *1*\n"), .marker([Token(key: "paragraph/bullet", value: "8,0")]), .text("dot\n"),
-            .marker([Token(key: "paragraph/bullet", value: nil), Token(key: "paragraph/bullet", value: "4,2")]), .text("two\n"),
-            .marker([Token(key: "paragraph/bullet", value: nil), Token(key: "paragraph/bullet", value: "2,true")]), .text("done\n"),
-            .marker([Token(key: "paragraph/bullet", value: nil)]), .text("- "),
+            .text("Plan *1*"), .marker([Token(key: "paragraph/bullet", value: "8,0")]), .text("\ndot"),
+            .marker([Token(key: "paragraph/bullet", value: nil), Token(key: "paragraph/bullet", value: "4,2")]), .text("\ntwo"),
+            .marker([Token(key: "paragraph/bullet", value: nil), Token(key: "paragraph/bullet", value: "2,true")]), .text("\ndone"),
+            .marker([Token(key: "paragraph/bullet", value: nil)]), .text("\n- "),
             .marker([Token(key: "span/bold", value: "1,True"), Token(key: "span/foregroundColor", value: nil), Token(key: "span/foregroundColor", value: "1,-1762269")]), .text("red bold"),
             .marker([Token(key: "span/bold", value: nil), Token(key: "span/fontSize", value: nil), Token(key: "span/fontSize", value: "3,20.0")]), .text(" big"),
             .marker([Token(key: "span/fontSize", value: nil), Token(key: "span/foregroundColor", value: nil), Token(key: "paragraph/alignment", value: nil)])])
@@ -115,12 +115,30 @@ enum SelfTest {
               RichStyle.label((.roman, 4, false)) == "iv.", RichStyle.label((.letter, 28, false)) == "ab.", RichStyle.label((.circledNumber, 3, false)) == "③"
         else { throw NotesError.message("Styled text mismatch.") }
         // Written back from runs, the styles survive, every style is closed, and plain text matches StyledText.encode.
+        // Samsung Notes opens the note only when every paragraph style starts at the text's start or on a newline.
+        func readableOnDevices(_ text: RichText) -> Bool {
+            let units = Array(text.plain.utf16)
+            var offset = 0, open: [String: Int] = [:], starts: [Int] = []
+            for item in text.items {
+                switch item {
+                case .text(let run): offset += run.utf16.count
+                case .marker(let tokens):
+                    for token in tokens {
+                        open[token.key, default: 0] += token.value == nil ? -1 : 1
+                        if token.value != nil, token.key.hasPrefix("paragraph/") { starts.append(offset) }
+                    }
+                }
+            }
+            return open.values.allSatisfy { $0 == 0 } && starts.allSatisfy { $0 == 0 || ($0 < units.count && units[$0] == 10) }
+        }
         let rebuilt = RichText(runs: rich.styledRuns)
-        var rebuiltOpen: [String: Int] = [:]
-        for case .marker(let tokens) in rebuilt.items { for token in tokens { rebuiltOpen[token.key, default: 0] += token.value == nil ? -1 : 1 } }
-        guard rebuilt.styledRuns.map(\.text) == rich.styledRuns.map(\.text),
-              zip(rebuilt.styledRuns, rich.styledRuns).allSatisfy({ $0.styles.merging(RichText.defaultStyles) { a, _ in a } == $1.styles.merging(RichText.defaultStyles) { a, _ in a } }),
-              rebuiltOpen.values.allSatisfy({ $0 == 0 }), try RichText(encoded: rebuilt.encoded) == rebuilt,
+        let blankLines = RichText(runs: [RichRun(text: "\n", styles: [:]), RichRun(text: "dot\n", styles: ["paragraph/bullet": "8,0"]),
+                                         RichRun(text: "\nend", styles: ["span/bold": "1,True"])])
+        guard RichText.normalized(rebuilt.styledRuns).map(\.text) == RichText.normalized(rich.styledRuns).map(\.text),
+              zip(RichText.normalized(rebuilt.styledRuns), RichText.normalized(rich.styledRuns)).allSatisfy({
+                  $0.styles.merging(RichText.defaultStyles) { a, _ in a } == $1.styles.merging(RichText.defaultStyles) { a, _ in a } }),
+              readableOnDevices(rebuilt), try RichText(encoded: rebuilt.encoded) == rebuilt,
+              readableOnDevices(blankLines), try RichText(encoded: blankLines.encoded) == blankLines, blankLines.plain == "\ndot\n\nend",
               RichText(runs: [RichRun(text: "Plain", styles: [:])]).encoded == StyledText.encode("Plain")
         else { throw NotesError.message("Styled text rebuild mismatch.") }
         // Markdown-style edits: unchanged lines keep their exact styles, changed and new lines take their markup.
