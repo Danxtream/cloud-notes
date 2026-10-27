@@ -36,6 +36,33 @@ enum SelfTest {
               let node = resource.first("nodeList")?.first("node"), node.attr("id") == "f1", node.attr("type") == "folder",
               node.value("parentFolderNodeId") == "a", decodedCloudName(node.value("name")) == "Plans & <ideas> 📒", node.value("state") == "normal",
               node.value("order") == "3", node.value("color") == "-1", node.value("createdTime") == "7", node.value("syncModifiedTime") == "7" else { throw NotesError.message("New folder request mismatch.") }
+        let oldIDs = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333",
+                      "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555", "66666666-6666-4666-8666-666666666666"]
+        func templateXML(attachment: Bool = false) -> String {
+            "<CompareNoteView><noteResource id=\"\(oldIDs[0])\" isLocked=\"false\" isEncrypted=\"false\" createdTime=\"1\" syncModifiedTime=\"1\">"
+            + "<noteTree ver=\"1\"><pageList><page h=\"x\" id=\"\(oldIDs[1])\" t=\"1\"><layerList><layer h=\"x\" id=\"\(oldIDs[2])\" t=\"1\"/></layerList></page></pageList>"
+            + "<bodyText h=\"x\" id=\"\(oldIDs[3])\" t=\"1\"/></noteTree><contentFileList>\(attachment ? "<contentFile id=\"f\" hash=\"h\"/>" : "")</contentFileList>"
+            + "<attributes modifiedTime=\"1\"><title><object id=\"\(oldIDs[4])\" hash=\"x\"><text>\(StyledText.encode("Old title"))</text></object></title></attributes>"
+            + "<pageList><page id=\"\(oldIDs[1])\" hash=\"x\"><layerList><layer id=\"\(oldIDs[2])\" hash=\"x\"><objectList/></layer></layerList></page></pageList>"
+            + "<bodyText id=\"\(oldIDs[3])\"><object id=\"\(oldIDs[5])\" hash=\"x\" timeStamp=\"1793058153714309\"><spanOrderDataList><spanOrderData val=\"OLDSPAN\"/></spanOrderDataList>"
+            + "<text>\(StyledText.encode("Old private text"))</text></object></bodyText></noteResource><commitId>c</commitId></CompareNoteView>"
+        }
+        let newNote = try CloudDocument.newNoteXML(template: Data(templateXML().utf8), id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "New idea", body: "Line one", now: Date(timeIntervalSince1970: 2))
+        let made = try XMLDocument(data: newNote, options: [.nodeLoadExternalEntitiesNever])
+        guard let note = made.rootElement(), note.name == "NoteResource", note.attr("id") == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", note.attr("syncModifiedTime") == "2000", note.attr("createdTime") == "2000000",
+              let page = note.first("pageList")?.first("page"), let treePage = note.first("noteTree")?.first("pageList")?.first("page"),
+              treePage.attr("id") == page.attr("id"), treePage.attr("h") == page.attr("hash"), treePage.attr("t") == page.attr("modifiedTime"),
+              let layer = page.first("layerList")?.first("layer"), let treeLayer = treePage.first("layerList")?.first("layer"),
+              treeLayer.attr("t") == layer.attr("modifiedTime"), treeLayer.attr("h") == layer.attr("hash"),
+              note.first("bodyText")?.first("object")?.attr("timeStamp") == "0",
+              note.first("bodyText")?.first("object")?.first("spanOrderDataList") == nil,
+              note.first("bodyText")?.attr("id") == note.first("noteTree")?.first("bodyText")?.attr("id"),
+              try StyledText.decode(note.first("bodyText")?.first("object")?.value("text") ?? "") == "Line one",
+              try StyledText.decode(note.first("attributes")?.first("title")?.first("object")?.value("text") ?? "") == "New idea",
+              !(oldIDs + ["OLDSPAN", StyledText.encode("Old private text"), StyledText.encode("Old title")]).contains(where: { String(decoding: newNote, as: UTF8.self).contains($0) })
+        else { throw NotesError.message("New note XML mismatch.") }
+        do { _ = try CloudDocument.newNoteXML(template: Data(templateXML(attachment: true).utf8), id: "b", title: "", body: ""); throw NotesError.message("A template with attachments was accepted.") }
+        catch let error as NotesError { if error.localizedDescription == "A template with attachments was accepted." { throw error } }
         guard try XMLDocument(data: CloudClient.newFolderXML(id: "f2", name: "Later", parent: "root", order: 0, latestSync: 42, now: 99), options: [.nodeLoadExternalEntitiesNever])
               .rootElement()?.value("syncModifiedTime") == "99" else { throw NotesError.message("New folder request time mismatch.") }
         let inkFixture = Data(base64Encoded:"/////wQAAACgDwAADQAAAAAADQAAAAEIAEoAAAABAEIAAAABAAEMAgAAAAAAAAAkQAAAAAAAADRAAAAAAAAAPkAAAAAAAABEQAAAAD8AAEA/AAAAAAoAAAACAFY0Ev8AAEBA")!
@@ -70,6 +97,14 @@ enum SelfTest {
         guard foundation.rootElement()?.xmlString(options: []) == portable.rootElement()?.xmlString() else { throw NotesError.message("Portable XML differs from Foundation XML.") }
         #endif
         let fixture = try CloudDocument(serverID: "fixture", data: Data(fixtureXML.utf8))
+        // Saves must stay readable on Samsung devices: timeStamp fits an Int32 and stale span data is gone, even when an
+        // earlier version of this client left a microsecond timeStamp behind.
+        let damaged = try CloudDocument(serverID: "damaged", data: Data(("<CompareNoteView><noteResource isLocked=\"false\" isEncrypted=\"false\"><noteTree ver=\"4000\"><bodyText id=\"body\" h=\"old\" t=\"0\"/></noteTree>"
+            + "<attributes><title><object timeStamp=\"1793068308238575\"><text>\(StyledText.encode("Title"))</text></object></title></attributes><bodyText id=\"body\"><object hash=\"old\" timeStamp=\"1793068308238575\">"
+            + "<spanOrderDataList><spanOrderData val=\"x\"/></spanOrderDataList><text>\(StyledText.encode("Old"))</text></object></bodyText></noteResource><commitId>c</commitId></CompareNoteView>").utf8))
+        let repaired = try XMLDocument(data: damaged.uploadXML(title: "Title", body: "New"), options: [.nodeLoadExternalEntitiesNever]).rootElement()
+        guard repaired?.first("bodyText")?.first("object")?.attr("timeStamp") == "0", repaired?.first("attributes")?.first("title")?.first("object")?.attr("timeStamp") == "0",
+              repaired?.first("bodyText")?.first("object")?.first("spanOrderDataList") == nil else { throw NotesError.message("A save left the note unreadable on Samsung devices.") }
         let cacheTestRoot = FileManager.default.temporaryDirectory.appendingPathComponent("SamsungCloudNotes-CacheTest-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: cacheTestRoot) }
         let cache = try NoteCache(session: session, base: cacheTestRoot)
@@ -97,14 +132,6 @@ enum SelfTest {
         record.locked = false
         guard reopened.document(record) == nil else { throw NotesError.message("Removed note was retained in cache.") }
         let updated = try XMLDocument(data: fixture.uploadXML(title: "Test title", body: "After 日本語 🚀"))
-        // Saves must stay readable on Samsung devices: timeStamp fits an Int32 and stale span data is gone, even when an
-        // earlier version of this client left a microsecond timeStamp behind.
-        let damaged = try CloudDocument(serverID: "damaged", data: Data(("<CompareNoteView><noteResource isLocked=\"false\" isEncrypted=\"false\"><noteTree ver=\"4000\"><bodyText id=\"body\" h=\"old\" t=\"0\"/></noteTree>"
-            + "<attributes><title><object timeStamp=\"1793068308238575\"><text>\(StyledText.encode("Title"))</text></object></title></attributes><bodyText id=\"body\"><object hash=\"old\" timeStamp=\"1793068308238575\">"
-            + "<spanOrderDataList><spanOrderData val=\"x\"/></spanOrderDataList><text>\(StyledText.encode("Old"))</text></object></bodyText></noteResource><commitId>c</commitId></CompareNoteView>").utf8))
-        let repaired = try XMLDocument(data: damaged.uploadXML(title: "Title", body: "New"), options: [.nodeLoadExternalEntitiesNever]).rootElement()
-        guard repaired?.first("bodyText")?.first("object")?.attr("timeStamp") == "0", repaired?.first("attributes")?.first("title")?.first("object")?.attr("timeStamp") == "0",
-              repaired?.first("bodyText")?.first("object")?.first("spanOrderDataList") == nil else { throw NotesError.message("A save left the note unreadable on Samsung devices.") }
         guard updated.rootElement()?.attr("unknownField") == "retain",
               try updated.nodes(forXPath: "/noteResource/pageList/page/opaqueDrawing[@value='preserve']").count == 1,
               try updated.nodes(forXPath: "/noteResource/contentFileList/contentFile[@hash='original']").count == 1 else { throw NotesError.message("Opaque drawing or attachment metadata was lost.") }

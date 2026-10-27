@@ -66,6 +66,8 @@ struct NotesView: View {
     @State var showDrawing = false
     @State var creatingFolder = false
     @State var newFolderName = ""
+    @State var creatingNote = false
+    @State var newNoteTitle = ""
     var body: some View {
         VStack(spacing: 0) {
         NavigationSplitView {
@@ -122,6 +124,20 @@ struct NotesView: View {
                 }.padding(.vertical, 5).tag(note.id)
             }
             .searchable(text: $model.search, prompt: "Search notes")
+            .toolbar {
+                ToolbarItem {
+                    Button { newNoteTitle = ""; creatingNote = true } label: { Label("New note", systemImage: "square.and.pencil") }
+                        .disabled(model.busy || model.account.isEmpty).help("New note")
+                }
+            }
+            .alert("New note", isPresented: $creatingNote) {
+                TextField("Title", text: $newNoteTitle)
+                Button("Create") { let title = newNoteTitle; Task { await model.createNote(title: title) } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                let folder = model.newFolderParent
+                Text(folder == "root" ? "Not in a folder." : "In \(model.folders.path(of: folder)).")
+            }
             .navigationSplitViewColumnWidth(min: 230, ideal: 290)
         } detail: {
             if let document = model.document {

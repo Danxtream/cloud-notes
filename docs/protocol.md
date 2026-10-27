@@ -99,6 +99,15 @@ Samsung stores the node's `syncModifiedTime` as sent, and other devices download
 
 Samsung Notes treats 409 as a conflict, 403 with error 128409 as a client clock ahead of the server, and 500 with 128900 as an account that requires encrypted folder names. The client creates folders only: it reads the tree first (parent, duplicate names, sibling count, newest time) and reads it again afterwards to confirm the folder exists. Renaming, moving, trashing and note membership use the same node shape but are not implemented.
 
+## Note create
+
+Samsung Notes 4.4.45 for Android uploads a brand-new text note in two steps:
+
+1. `PATCH /samsungnotes/v1/folder` with the note's tree node: `type="note"`, the note's UUID as `id`, `parentFolderNodeId` (`root` for no folder), Base64 title as `name` (Base64 of a space for an empty title) and `order` 999999. The server accepts the node before the note exists.
+2. `POST /samsungnotes/v1/notes`, multipart with one `noteResource` part holding a `NoteResource` (`id`, `createdTime`, `syncModifiedTime`, `isLocked`, `isEncrypted`, `ownerId`, `xmlVer`, then `noteTree`, `attributes` with the title object, `pageList` and `bodyText`). The response is a `DefaultView` whose `resourceId` is the server id used by every other note request.
+
+Notes with attachments also register files with `POST /samsungnotes/v2/binaries/createUploadURLs` and upload them first; this client creates text notes only. Rather than reproduce the full attribute and page structure, it builds new notes from a template: the simplest plain-text note already in the cache (one page, no attachments or drawings), or one chosen with `scnotes template`. Every id in the template is replaced consistently, its title, text and span order data are replaced or removed, rewritten elements get new SHA-256 hashes, and times are set to now. The template stays on the device.
+
 "Math notes" (`math:///`) and "Screen off memo" (`screenOffMemo:///`) are built-in folders that Samsung Notes creates itself; the client does not create subfolders in them.
 
 ## Remaining interoperability work

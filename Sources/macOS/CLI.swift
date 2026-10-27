@@ -27,6 +27,9 @@ enum CommandLineTool {
     Changes
       edit NOTE [--title TEXT] [--body TEXT | --body-file PATH|-] [--discard-draft]
                                      Replace title and/or typed text, then save to Samsung Cloud
+      new TITLE [--folder PATH] [--body TEXT | --body-file PATH|-]
+                                     Create a text note in Samsung Cloud from the template
+      template NOTE                  Copy new notes' structure from NOTE instead of the automatic choice
       mkdir PATH                     Create a folder in Samsung Cloud, e.g. "Dev/New ideas"
       export NOTE DIRECTORY          Write NOTE.samsungnote (original XML, text, attachments)
       drawing NOTE OUTPUT.pdf        Write the approximate handwriting preview
@@ -121,6 +124,14 @@ enum CommandLineTool {
         case "show": try arguments(1, "NOTE [--xml]"); try await show(options.positional[0], options)
         case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-]"); try await edit(options.positional[0], options)
         case "mkdir": try arguments(1, "PATH"); try await mkdir(options.positional[0], options)
+        case "new": try arguments(1, "TITLE [--folder PATH] [--body TEXT | --body-file PATH|-]"); try await new(options.positional[0], options)
+        case "template":
+            try arguments(1, "NOTE")
+            guard !options.offline else { throw Failure(message: "template downloads the note; run it without --offline.", code: 2) }
+            let library = try await Library.load(offline: false, strict: true)
+            let record = try library.resolve(options.positional[0])
+            try LocalStore.saveNoteTemplate(try await library.client.download(record.id))
+            print("New notes will be built from note \(record.id).")
         case "export": try arguments(2, "NOTE DIRECTORY"); try await export(options.positional[0], to: options.positional[1], options)
         case "drawing": try arguments(2, "NOTE OUTPUT.pdf"); try await drawing(options.positional[0], to: options.positional[1], options)
         case "login":
@@ -269,6 +280,26 @@ enum CommandLineTool {
         let folders = library.index.folders + [created]
         if options.json { try printJSON(["id": created.id, "name": created.name, "parent": created.parent, "path": folders.path(of: created.id)]) }
         else { print("Created \(folders.path(of: created.id))\t\(created.id)") }
+    }
+
+    /// Creates a text note titled TITLE in --folder (no folder by default) from the saved template.
+    @MainActor static func new(_ title: String, _ options: Options) async throws {
+        guard !options.offline else { throw Failure(message: "new writes to Samsung Cloud; run it without --offline.", code: 2) }
+        var body = options.value("body") ?? ""
+        if let path = options.value("body-file") {
+            guard options.value("body") == nil else { throw Failure(message: "Use either --body or --body-file.", code: 2) }
+            let data = path == "-" ? FileHandle.standardInput.readDataToEndOfFile() : try Data(contentsOf: URL(fileURLWithPath: path))
+            guard let text = String(data: data, encoding: .utf8) else { throw Failure(message: "The body must be UTF-8 text.") }
+            body = text
+        }
+        let library = try await Library.load(offline: false, strict: true)
+        let folder = try options.value("folder").map { try library.folder($0).id } ?? "root"
+        let template = try LocalStore.noteTemplate(choosingFrom: Array(library.documents.values))
+        let created = try await library.client.createNote(title: title, body: body, in: folder, template: template)
+        try library.cache.save(created, revision: created.commit)
+        let path = folder == "root" ? "" : library.folderPath(folder)
+        if options.json { try printJSON(["id": created.serverID, "title": created.title, "folderId": folder, "folderPath": path, "revision": created.commit]) }
+        else { print("Created \(created.serverID)\t\(created.title)\(path.isEmpty ? "" : "\t[\(path)]")") }
     }
 
     @MainActor static func search(_ query: String, _ options: Options) async throws {

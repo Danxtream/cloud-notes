@@ -179,6 +179,20 @@ import Combine
             status = "Created folder \(created.name)"
         } catch { busy = false; self.error = error.localizedDescription; status = "The folder was not created." }
     }
+    /// Creates a text note in the selected folder (none for All notes, Trash or a built-in folder), refreshes the
+    /// library and opens the new note. The first time, the simplest cached text note lends its structure.
+    func createNote(title: String) async {
+        guard let client, !busy else { return }
+        busy = true; status = "Creating note…"
+        do {
+            let template = try LocalStore.noteTemplate(choosingFrom: notes.compactMap { loaded[$0.id] ?? cache?.document($0) })
+            let created = try await client.createNote(title: title, body: "", in: newFolderParent, template: template)
+            busy = false
+            await refresh()
+            selection = created.serverID
+            status = "Created note \(created.title.isEmpty ? "(untitled)" : created.title)"
+        } catch { busy = false; self.error = error.localizedDescription; status = "The note was not created." }
+    }
     private func describe(_ index: Int, document: CloudDocument) { notes[index].describe(document) }
     func select(_ id: String?) async {
         preserveDraft()

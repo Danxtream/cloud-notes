@@ -243,6 +243,75 @@ final class CloudDocument {
     private func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 }
 
+extension CloudDocument {
+    /// Why `self` cannot lend its structure to new notes, or nil if it can: it must be an unlocked, single-page typed-text
+    /// note without attachments or drawings. Its title, text and span data are never copied (see `newNoteXML`).
+    var templateIssue: String? {
+        if resource.attr("isLocked") == "true" || resource.attr("isEncrypted") == "true" { return "Locked notes cannot be templates." }
+        if let textIssue { return textIssue }
+        if !(resource.first("contentFileList")?.elements(forName: "contentFile").isEmpty ?? true) || !drawingPages.isEmpty
+            || (resource.first("pageList")?.elements(forName: "page").count ?? 0) > 1 { return "The template must be a single page without attachments or drawings." }
+        if bodyObject == nil || titleObject == nil || resource.first("noteTree")?.first("bodyText") == nil { return "This note has no typed-text body or title to fill in." }
+        return nil
+    }
+    /// The simplest of `documents` that can lend its structure to new notes, or nil if none can.
+    static func templateCandidate(_ documents: [CloudDocument]) -> CloudDocument? {
+        documents.filter { $0.templateIssue == nil }.min { $0.original.count < $1.original.count }
+    }
+    /// The `NoteResource` for a brand-new note built from `template`, a typed-text note as downloaded with
+    /// `compareForDownsync`. Every id is replaced with a fresh one wherever it appears, so the note tree still
+    /// matches its page, layer, title and body objects; the note gets `id`. The template's title, text and span
+    /// order data are replaced or removed, rewritten elements get fresh hashes, and all times are now (Samsung
+    /// stores `syncModifiedTime` as sent).
+    static func newNoteXML(template: Data, id: String, title: String, body: String, now: Date = Date()) throws -> Data {
+        let original = try CloudDocument(serverID: "template", data: template)
+        if let issue = original.templateIssue { throw NotesError.message(issue) }
+        var source = String(decoding: template, as: UTF8.self)
+        let pattern = try NSRegularExpression(pattern: "id=\"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\"")
+        let ids = Set(pattern.matches(in: source, range: NSRange(source.startIndex..., in: source)).compactMap { match in
+            Range(match.range(at: 1), in: source).map { String(source[$0]) }
+        })
+        for old in ids { source = source.replacingOccurrences(of: "\"\(old)\"", with: "\"\(old == original.resource.attr("id") ? id : UUID().uuidString.lowercased())\"") }
+        let document = try CloudDocument(serverID: "new", data: Data(source.utf8))
+        guard let bodyObject = document.bodyObject, let bodyTree = document.resource.first("noteTree")?.first("bodyText"),
+              let titleObject = document.titleObject else { throw NotesError.message("The template lost its text objects.") }
+        let millis = String(Int64(now.timeIntervalSince1970 * 1000)), micros = String(Int64(now.timeIntervalSince1970 * 1_000_000))
+        // Samsung Notes writes the resource's createdTime in microseconds and its syncModifiedTime in milliseconds.
+        document.resource.set("createdTime", micros); document.resource.set("syncModifiedTime", millis)
+        if let attributes = document.resource.first("attributes") {
+            attributes.set("displayCreatedTime", millis); attributes.set("displayModifiedTime", millis)
+            attributes.set("modifiedTime", micros); attributes.set("editTime", micros)
+        }
+        for object in [bodyObject, titleObject] { Self.dropSpanOrder(object) }
+        if let text = bodyObject.first("text") { text.stringValue = StyledText.encode(body) }
+        else { bodyObject.addChild(XMLElement(name: "text", stringValue: StyledText.encode(body))) }
+        document.updateObject(bodyObject, tree: bodyTree, now: now)
+        if let text = titleObject.first("text") { text.stringValue = title.isEmpty ? "" : StyledText.encode(title) }
+        else if !title.isEmpty { titleObject.addChild(XMLElement(name: "text", stringValue: StyledText.encode(title))) }
+        titleObject.set("modifiedTime", micros); titleObject.set("hash", document.hash(titleObject.bytes))
+        // The page holds the layer, so the layer is hashed first. Samsung matches each note tree entry to its element by
+        // id + time + hash (`t` must equal the element's `modifiedTime`, `h` its `hash`), so both are set together.
+        let pages = document.resource.first("pageList")?.elements(forName: "page") ?? []
+        let treePages = document.resource.first("noteTree")?.first("pageList")?.elements(forName: "page") ?? []
+        for page in pages {
+            let treePage = treePages.first { $0.attr("id") == page.attr("id") }
+            for layer in page.first("layerList")?.elements(forName: "layer") ?? [] {
+                layer.set("modifiedTime", micros); layer.set("hash", document.hash(layer.bytes))
+                if let treeLayer = treePage?.first("layerList")?.elements(forName: "layer").first(where: { $0.attr("id") == layer.attr("id") }) {
+                    treeLayer.set("h", layer.attr("hash")); treeLayer.set("t", micros)
+                }
+            }
+            page.set("modifiedTime", micros); page.set("hash", document.hash(page.bytes))
+            treePage?.set("h", page.attr("hash")); treePage?.set("t", micros)
+        }
+        // Samsung Notes names the upload's root NoteResource; the download calls it noteResource.
+        var xml = String(decoding: document.resource.bytes, as: UTF8.self)
+        if xml.hasPrefix("<noteResource") { xml = "<NoteResource" + xml.dropFirst("<noteResource".count) }
+        if xml.hasSuffix("</noteResource>") { xml = String(xml.dropLast("</noteResource>".count)) + "</NoteResource>" }
+        return Data(xml.utf8)
+    }
+}
+
 private final class CloudRedirectDelegate: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
@@ -350,19 +419,23 @@ final class CloudClient {
         }
         return CloudIndex(notes: notes.values.sorted { $0.modified > $1.modified }, folders: folders.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
     }
-    /// The `FolderResource` body Samsung Notes sends to create one folder with `PATCH /folder`, as observed in
-    /// Samsung Notes 4.4.45 for Android. Samsung stores the node's `syncModifiedTime` as sent and other devices
-    /// only download nodes newer than their last change point, so the node is stamped with the current time and
-    /// the resource with the newest time in the tree. The colour is Samsung's default (-1) and `order` places
-    /// the folder after its siblings.
+    /// The `FolderResource` body Samsung Notes sends to create one folder with `PATCH /folder`; `order` places it after its siblings.
     static func newFolderXML(id: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64) -> Data {
+        treeNodeXML(id: id, type: "folder", name: name, parent: parent, order: order, latestSync: latestSync, now: now)
+    }
+    /// A `FolderResource` holding one new tree node, as Samsung Notes 4.4.45 for Android sends it with `PATCH /folder`
+    /// for a new folder, or for a new note before the note itself is uploaded (a note's node places it in a folder).
+    /// Samsung stores the node's `syncModifiedTime` as sent and other devices only download nodes newer than their
+    /// last change point, so the node is stamped with the current time and the resource with the newest time in the
+    /// tree. The colour is Samsung's default (-1).
+    static func treeNodeXML(id: String, type: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64) -> Data {
         func escaped(_ value: String) -> String {
             value.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
         }
         let device = (try? JSONSerialization.data(withJSONObject: ["model": ClientPlatform.model, "ver": appShortVersion], options: [.sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let node = "<node id=\"\(escaped(id))\" type=\"folder\"><parentFolderNodeId>\(escaped(parent))</parentFolderNodeId>"
+        let node = "<node id=\"\(escaped(id))\" type=\"\(escaped(type))\"><parentFolderNodeId>\(escaped(parent))</parentFolderNodeId>"
             + "<syncModifiedTime>\(now)</syncModifiedTime><createdTime>\(now)</createdTime><lastModifiedTime>\(now)</lastModifiedTime>"
             + "<name>\(Data(name.utf8).base64EncodedString())</name><state>normal</state><trashedTime>0</trashedTime><color>-1</color>"
             + "<order>\(order)</order><requestTime>\(now)</requestTime><requestDevice>\(escaped(device))</requestDevice></node>"
@@ -373,6 +446,14 @@ final class CloudClient {
         var components = URLComponents(); components.queryItems = [URLQueryItem(name: "lastChangePoint", value: Self.initialCursor("FOLDER"))]
         return try await request("/samsungnotes/v1/folder/changes?" + components.percentEncodedQuery!)
     }
+    /// The folder and note nodes of the account's tree, with names decoded.
+    func treeNodes() async throws -> [(id: String, type: String, parent: String, state: String, name: String, synced: Int64)] {
+        let xml = try XMLDocument(data: try await folderTreeXML(), options: [.nodeLoadExternalEntitiesNever])
+        return (xml.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? []).map {
+            (id: $0.attr("id"), type: $0.attr("type"), parent: $0.value("parentFolderNodeId"), state: $0.value("state"),
+             name: decodedCloudName($0.value("name")), synced: Int64($0.value("syncModifiedTime")) ?? 0)
+        }
+    }
     /// Creates a folder under `parent` ("root" for the top level) the way Samsung Notes does, then reads the
     /// tree back to confirm Samsung stored it. Built-in folders such as Math notes cannot hold subfolders.
     func createFolder(named rawName: String, in parent: String) async throws -> FolderRecord {
@@ -382,14 +463,7 @@ final class CloudClient {
             throw NotesError.message("Folder names need 1 to 100 characters and no \"/\".")
         }
         guard !parent.contains(":///") else { throw NotesError.message("Built-in folders cannot contain subfolders.") }
-        func nodes() async throws -> [(id: String, type: String, parent: String, state: String, name: String, synced: Int64)] {
-            let xml = try XMLDocument(data: try await folderTreeXML(), options: [.nodeLoadExternalEntitiesNever])
-            return (xml.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? []).map {
-                (id: $0.attr("id"), type: $0.attr("type"), parent: $0.value("parentFolderNodeId"), state: $0.value("state"),
-                 name: decodedCloudName($0.value("name")), synced: Int64($0.value("syncModifiedTime")) ?? 0)
-            }
-        }
-        let tree = try await nodes()
+        let tree = try await treeNodes()
         let folders = tree.filter { $0.type == "folder" && $0.state == "normal" }
         if parent != "root", !folders.contains(where: { $0.id == parent }) { throw NotesError.message("The parent folder no longer exists. Refresh and try again.") }
         let siblings = folders.filter { $0.parent == parent }
@@ -400,10 +474,38 @@ final class CloudClient {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let body = Self.newFolderXML(id: id, name: name, parent: parent, order: siblings.count, latestSync: tree.map(\.synced).max() ?? 0, now: now)
         _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
-        guard try await nodes().contains(where: { $0.id == id && $0.state == "normal" && $0.name == name }) else {
+        guard try await treeNodes().contains(where: { $0.id == id && $0.state == "normal" && $0.name == name }) else {
             throw NotesError.message("Samsung accepted the request, but the new folder did not appear. Refresh before trying again.")
         }
         return FolderRecord(id: id, name: name, parent: parent)
+    }
+    /// Creates a text note in `folder` ("root" for none) the way Samsung Notes does: its tree node goes up first with
+    /// `PATCH /folder`, then the note itself with `POST /notes`, built from `template` (see `CloudDocument.newNoteXML`).
+    /// The note is downloaded again to confirm its title and text. Returns the new note as Samsung stores it.
+    func createNote(title rawTitle: String, body: String, in folder: String, template: Data) async throws -> CloudDocument {
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !folder.contains(":///") else { throw NotesError.message("Built-in folders cannot hold new notes from this app.") }
+        let tree = try await treeNodes()
+        if folder != "root", !tree.contains(where: { $0.id == folder && $0.type == "folder" && $0.state == "normal" }) {
+            throw NotesError.message("That folder no longer exists. Refresh and try again.")
+        }
+        let id = UUID().uuidString.lowercased(), now = Date()
+        let xml = try CloudDocument.newNoteXML(template: template, id: id, title: title, body: body, now: now)
+        let millis = Int64(now.timeIntervalSince1970 * 1000)
+        // Samsung Notes places a new note (order 999999 = after existing notes) before uploading it.
+        let node = Self.treeNodeXML(id: id, type: "note", name: title.isEmpty ? " " : title, parent: folder, order: 999_999,
+                                    latestSync: tree.map(\.synced).max() ?? 0, now: millis)
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: node, contentType: "application/xml;Charset=utf-8")
+        let boundary = "SamsungNotesMac-" + UUID().uuidString
+        var payload = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"noteResource\"\r\nContent-Type: application/xml\r\n\r\n".utf8)
+        payload.append(xml); payload.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        let response = try await request("/samsungnotes/v1/notes", method: "POST", body: payload, contentType: "multipart/form-data; boundary=\(boundary)")
+        let view = try XMLDocument(data: response, options: [.nodeLoadExternalEntitiesNever]).rootElement()
+        let serverID = view.map { $0.value("resourceId").isEmpty ? $0.attr("resourceId") : $0.value("resourceId") } ?? ""
+        guard !serverID.isEmpty else { throw NotesError.message("Samsung queued the new note without an id yet. Refresh in a minute to see it.") }
+        let fresh = try await download(serverID)
+        guard fresh.title == title, fresh.body == body else { throw NotesError.message("Samsung created the note, but its readback differs. Refresh and check it before editing.") }
+        return fresh
     }
     func download(_ id: String) async throws -> CloudDocument {
         guard id.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else { throw NotesError.message("Invalid note identifier.") }
@@ -450,6 +552,24 @@ enum LocalStore {
         let destination = try directory("Backups").appendingPathComponent("\(document.serverID)-\(Int(Date().timeIntervalSince1970 * 1000)).xml")
         try document.original.write(to: destination, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+    }
+    /// The note whose structure new notes copy (its downloaded XML), kept only on this device.
+    static var noteTemplate: Data? { try? Data(contentsOf: root.appendingPathComponent("NoteTemplate.xml")) }
+    /// The saved template, or the simplest suitable note among `documents`, saved for next time.
+    static func noteTemplate(choosingFrom documents: [CloudDocument]) throws -> Data {
+        if let saved = noteTemplate { return saved }
+        guard let candidate = CloudDocument.templateCandidate(documents) else {
+            throw NotesError.message("No plain text note to copy Samsung's note layout from yet. Make a short text note on another device, refresh, and try again.")
+        }
+        try saveNoteTemplate(candidate)
+        return candidate.original
+    }
+    static func saveNoteTemplate(_ document: CloudDocument) throws {
+        if let issue = document.templateIssue { throw NotesError.message(issue) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let url = root.appendingPathComponent("NoteTemplate.xml")
+        try document.original.write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
     static func writeDraft(id: String, title: String, body: String, commit: String) throws {
         let data = try JSONSerialization.data(withJSONObject: ["title": title, "body": body, "commit": commit])
