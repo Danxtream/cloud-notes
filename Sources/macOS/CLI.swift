@@ -18,8 +18,9 @@ enum CommandLineTool {
     Library
       status                         Account, cache and version information
       sync                           Download changed notes into the local cache
-      list [--folder NAME|PATH] [--trash] [--limit N]
-                                     List notes, newest first
+      list [--folder NAME|PATH] [--trash] [--limit N] [--sort modified|created|name] [--reverse]
+                                     List notes, newest first, or by date created or name (A to Z);
+                                     --reverse turns the order round
       folders [--xml]                List folders with their paths (Parent/Child) and colours, or Samsung's raw folder tree
       search QUERY                   Search titles and full typed text
       show NOTE [--markdown | --xml] Print a note's title and text, with its formatting as
@@ -69,8 +70,8 @@ enum CommandLineTool {
         var json: Bool { flags.contains("json") }
         var offline: Bool { flags.contains("offline") }
     }
-    static let valueOptions: Set<String> = ["folder", "limit", "title", "body", "body-file"]
-    static let flagOptions: Set<String> = ["json", "offline", "trash", "xml", "markdown", "discard-draft", "help"]
+    static let valueOptions: Set<String> = ["folder", "limit", "title", "body", "body-file", "sort"]
+    static let flagOptions: Set<String> = ["json", "offline", "trash", "xml", "markdown", "discard-draft", "help", "reverse"]
 
     static func run(_ arguments: [String]) -> Never {
         guard let command = arguments.first, !["help", "-h", "--help"].contains(command) else { print(usage); exit(0) }
@@ -119,7 +120,7 @@ enum CommandLineTool {
             try arguments(0, "")
             let library = try await Library.load(offline: false, strict: true)
             print("\(library.index.notes.filter { !$0.trashed }.count) notes, \(library.index.folders.count) folders · downloaded \(library.downloaded) changed or missing documents.")
-        case "list": try arguments(0, "[--folder NAME] [--trash]"); try await list(options)
+        case "list": try arguments(0, "[--folder NAME] [--trash] [--sort modified|created|name] [--reverse]"); try await list(options)
         case "folders":
             try arguments(0, "[--xml]")
             if options.flags.contains("xml") {
@@ -283,6 +284,12 @@ enum CommandLineTool {
         if let folder = options.value("folder") {
             let target = try library.folder(folder)
             notes = notes.filter { $0.folder == target.id }
+        }
+        if options.value("sort") != nil || options.flags.contains("reverse") {
+            guard let key = NoteSort.Key(rawValue: options.value("sort") ?? "modified") else {
+                throw Failure(message: "--sort takes modified, created or name.", code: 2)
+            }
+            notes = NoteSort(key: key, reversed: options.flags.contains("reverse")).sorted(notes)
         }
         if let limit = options.value("limit") {
             guard let count = Int(limit), count > 0 else { throw Failure(message: "--limit needs a positive number.", code: 2) }

@@ -235,6 +235,21 @@ struct NotesView: View {
         }
         .navigationSplitViewColumnWidth(min: 160, ideal: 200)
     }
+    /// The note list's Sort menu, with the orders Samsung Notes offers; the choice is kept on this Mac for every folder.
+    var sortMenu: some View {
+        Menu {
+            Picker("Sort By", selection: $model.sort.key) {
+                ForEach(NoteSort.Key.allCases) { key in Text(key.label).tag(key) }
+            }.pickerStyle(.inline)
+            Picker("Order", selection: $model.sort.reversed) {
+                Text(model.sort.key == .name ? "A to Z" : "Newest First").tag(false)
+                Text(model.sort.key == .name ? "Z to A" : "Oldest First").tag(true)
+            }.pickerStyle(.inline)
+            Divider()
+            Toggle("Favorites at the Top", isOn: $model.sort.favoritesFirst)
+        } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
+        .help("Sort notes")
+    }
     /// A folder's right-click menu, as Samsung Notes' long-press menu: new subfolder, rename, colour and delete.
     /// Built-in folders such as Math notes have none of these.
     @ViewBuilder func folderMenu(_ folder: FolderRecord) -> some View {
@@ -330,6 +345,7 @@ struct NotesView: View {
                 Button { newNoteTitle = ""; creatingNote = true } label: { Label("New note", systemImage: "square.and.pencil") }
                     .disabled(model.busy || model.account.isEmpty).help("New note")
             }
+            ToolbarItem { sortMenu }
         }
         .alert("New note", isPresented: $creatingNote) {
             TextField("Title", text: $newNoteTitle)

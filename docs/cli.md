@@ -27,7 +27,7 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | --- | --- |
 | `scnotes status` | Account, connection type, cache size, last sync, data directory |
 | `scnotes sync` | Refresh the index and download changed or missing documents |
-| `scnotes list [--folder NAME\|PATH] [--trash] [--limit N]` | Notes, newest first: ID, date, title, folder path |
+| `scnotes list [--folder NAME\|PATH] [--trash] [--limit N] [--sort modified\|created\|name] [--reverse]` | Notes, newest first: ID, date, title, folder path; `--sort created` puts the newest created first, `--sort name` goes from A to Z, and `--reverse` turns the order round |
 | `scnotes folders` | Folder IDs, paths and colours; subfolders appear as `Parent/Child`. Built-in folders such as Math notes are listed only while they hold notes, as on the phone |
 | `scnotes search QUERY` | Case-insensitive search of titles and full typed text |
 | `scnotes show NOTE [--markdown \| --xml]` | Title, text, attachment names and drawing page count; `--markdown` shows the text's formatting as Markdown-style text (see below), `--xml` prints the original cloud document |

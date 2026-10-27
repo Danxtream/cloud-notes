@@ -48,11 +48,15 @@ import Combine
     /// `styledBody` as a draft stores it.
     private var styledDraft: String? { styledBody.map { RichText(runs: $0, defaults: document?.richBody?.commonStyles ?? RichText.defaultStyles).encoded } }
     var visibleNotes: [NoteRecord] {
-        notes.filter { note in
+        sort.sorted(notes.filter { note in
             let inFolder = folder == "all" ? !note.trashed : folder == "trash" ? note.trashed
                 : folder == "favorites" ? note.isFavorite && !note.trashed : note.folder == folder && !note.trashed
             return inFolder && (search.isEmpty || (note.title + " " + note.snippet).localizedCaseInsensitiveContains(search))
-        }
+        })
+    }
+    /// The note list's order, kept on this device for every folder.
+    @Published var sort: NoteSort = UserDefaults.standard.data(forKey: "noteSort").flatMap { try? JSONDecoder().decode(NoteSort.self, from: $0) } ?? NoteSort() {
+        didSet { if let data = try? JSONEncoder().encode(sort) { UserDefaults.standard.set(data, forKey: "noteSort") } }
     }
     var editable: Bool {
         guard let doc = document else { return false }
@@ -451,5 +455,8 @@ extension NoteRecord {
         snippet = String(document.body.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))
         resourceID = document.resource.attr("id")
         favorite = document.isFavorite
+        // Samsung Notes shows displayCreatedTime (milliseconds); the resource's createdTime is in microseconds.
+        created = Double(document.resource.first("attributes")?.attr("displayCreatedTime") ?? "")
+            ?? Double(document.resource.attr("createdTime")).map { $0 / 1000 }
     }
 }

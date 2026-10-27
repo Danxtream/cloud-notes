@@ -103,6 +103,8 @@ struct NoteRecord: Identifiable, Codable {
     var isFavorite: Bool { favorite == true }
     /// When the note was moved to the Trash (milliseconds), from its tree node.
     var trashedTime: Double? = nil
+    /// When the note was created (milliseconds), from its document; nil until the document has been read.
+    var created: Double? = nil
     /// Days until Samsung Notes deletes a trashed note for good: it empties its Trash after 30 days.
     func daysLeftInTrash(now: Date = Date()) -> Int? {
         guard trashed, let moved = trashedTime, moved > 0 else { return nil }

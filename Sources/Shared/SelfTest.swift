@@ -98,6 +98,20 @@ enum SelfTest {
               trashing[1...3].allSatisfy({ $0.state == "trashed" && $0.trashed == 9 && $0.modified == 2 }), trashing[1...3].map(\.parent) == ["b", "b", "c"],
               trashing[1...3].map(\.restorePath) == ["uncategorized:///Dev/Repos/Old", "uncategorized:///Dev/Repos", "uncategorized:///Dev/Repos/Old"],
               trashing[4].state == "normal", trashing[4].modified == 9 else { throw NotesError.message("Folder delete nodes mismatch.") }
+        // Note orders: dates newest first, names A to Z the way Finder sorts them (case, accents, numbers), ties by date
+        // modified, a missing creation date counting as the modification date, favourites first when asked.
+        func sortable(_ id: String, _ title: String, modified: Double, created: Double?, favorite: Bool = false) -> NoteRecord {
+            var note = NoteRecord(id: id, resourceID: id, commit: "c", modified: modified, locked: false, encrypted: false)
+            note.title = title; note.created = created; note.favorite = favorite; return note
+        }
+        let sortNotes = [sortable("1", "banana", modified: 50, created: 10), sortable("2", "Apple", modified: 40, created: 30, favorite: true),
+                         sortable("3", "Éclair", modified: 30, created: nil), sortable("4", "item 10", modified: 20, created: 20),
+                         sortable("5", "item 9", modified: 20, created: 5)]
+        func order(_ sort: NoteSort) -> [String] { sort.sorted(sortNotes).map(\.id) }
+        guard order(NoteSort()) == ["1", "2", "3", "4", "5"], order(NoteSort(key: .modified, reversed: true)) == ["4", "5", "3", "2", "1"],
+              order(NoteSort(key: .name)) == ["2", "1", "3", "5", "4"], order(NoteSort(key: .name, reversed: true)) == ["4", "5", "3", "1", "2"],
+              order(NoteSort(key: .created)) == ["2", "3", "4", "1", "5"], order(NoteSort(key: .name, favoritesFirst: true)) == ["2", "1", "3", "5", "4"],
+              order(NoteSort(key: .modified, favoritesFirst: true)) == ["2", "1", "3", "4", "5"] else { throw NotesError.message("Note order mismatch.") }
         // Folder colours: every picker value and its 70% alpha variant read back as that colour; -1 and others are grey.
         guard FolderColor.allCases.allSatisfy({ FolderColor(stored: $0.stored) == $0 }), FolderColor.red.stored == -48845,
               FolderColor(stored: Int(Int32(bitPattern: 0xB3FF_4133))) == .red, FolderColor(stored: -1) == .grey, FolderColor(stored: 0) == .grey,
