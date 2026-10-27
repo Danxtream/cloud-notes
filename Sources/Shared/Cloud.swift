@@ -287,11 +287,21 @@ final class CloudClient {
         guard (200..<300).contains(http.statusCode) else {
             let xml = try? XMLDocument(data: data, options: [.nodeLoadExternalEntitiesNever])
             let message = xml?.rootElement()?.value("message") ?? ""
-            throw NotesError.message("Samsung Cloud returned \(http.statusCode)\(message.isEmpty ? "" : ": " + message).")
+            let details = Self.errorDetails(String(decoding: data.prefix(8192), as: UTF8.self))
+            throw NotesError.message("Samsung Cloud returned \(http.statusCode)\(message.isEmpty ? "" : ": " + message)\(details.isEmpty ? "" : " (" + details + ")").")
         }
         return data
         }
         throw NotesError.message("Samsung could not renew the Notes connection.")
+    }
+    /// The `field`, `value` and `reason` entries of a Samsung `ErrorResource`, e.g. "id: 1234 duplicated", which say what a 4xx rejected.
+    static func errorDetails(_ body: String) -> String {
+        guard let pattern = try? NSRegularExpression(pattern: "<(field|value|reason)>([^<]{1,200})</(?:field|value|reason)>") else { return "" }
+        let parts = pattern.matches(in: body, range: NSRange(body.startIndex..., in: body)).compactMap { match -> (String, String)? in
+            guard let kind = Range(match.range(at: 1), in: body), let value = Range(match.range(at: 2), in: body) else { return nil }
+            return (String(body[kind]), String(body[value]))
+        }
+        return parts.map { $0.0 == "field" ? $0.1 + ":" : $0.1 }.joined(separator: " ")
     }
     static func initialCursor(_ type: String) -> String {
         let value: [String: Any] = ["version": 0, "encryptedGuid": "", "requestTimeStamp": 0,
