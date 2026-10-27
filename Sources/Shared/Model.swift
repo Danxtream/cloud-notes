@@ -193,6 +193,26 @@ import Combine
             status = "Created note \(created.title.isEmpty ? "(untitled)" : created.title)"
         } catch { busy = false; self.error = error.localizedDescription; status = "The note was not created." }
     }
+    enum NoteChange { case trash, restore, deleteForever }
+    /// Moves a note to the Trash, restores it to its folder, or deletes it for good (only from the Trash), then
+    /// refreshes the library. Samsung Notes deletes trashed notes for good after 30 days.
+    func change(note id: String, _ change: NoteChange) async {
+        guard let client, !busy, let note = notes.first(where: { $0.id == id }) else { return }
+        preserveDraft(); busy = true
+        status = change == .trash ? "Moving to Trash…" : change == .restore ? "Restoring…" : "Deleting…"
+        do {
+            switch change {
+            case .trash: try await client.setNoteState(note, to: "trashed", folders: folders)
+            case .restore: try await client.setNoteState(note, to: "normal", folders: folders)
+            case .deleteForever: try await client.deleteNote(note, folders: folders)
+            }
+            busy = false
+            if selection == id { selection = nil; document = nil }
+            await refresh()
+            status = change == .trash ? "Moved to Trash. Samsung Notes deletes it for good after 30 days."
+                : change == .restore ? "Restored \(note.title)." : "Deleted \(note.title) for good."
+        } catch { busy = false; self.error = error.localizedDescription; status = "The note was not changed." }
+    }
     private func describe(_ index: Int, document: CloudDocument) { notes[index].describe(document) }
     func select(_ id: String?) async {
         preserveDraft()

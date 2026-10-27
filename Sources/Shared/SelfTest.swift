@@ -65,6 +65,19 @@ enum SelfTest {
         catch let error as NotesError { if error.localizedDescription == "A template with attachments was accepted." { throw error } }
         guard try XMLDocument(data: CloudClient.newFolderXML(id: "f2", name: "Later", parent: "root", order: 0, latestSync: 42, now: 99), options: [.nodeLoadExternalEntitiesNever])
               .rootElement()?.value("syncModifiedTime") == "99" else { throw NotesError.message("New folder request time mismatch.") }
+        let tree = [FolderRecord(id: "a", name: "Dev", parent: "root"), FolderRecord(id: "b", name: "Repos", parent: "a")]
+        guard CloudClient.restorePath(of: "b", folders: tree) == "uncategorized:///Dev/Repos", CloudClient.restorePath(of: "root", folders: tree) == "uncategorized:///",
+              CloudClient.restoreParent("uncategorized:///Dev/Repos", folders: tree) == "b", CloudClient.restoreParent("uncategorized:///Gone", folders: tree) == "root",
+              CloudClient.restoreParent("uncategorized:///", folders: tree) == "root", CloudClient.restoreParent("", folders: tree) == "root" else { throw NotesError.message("Restore path mismatch.") }
+        let trashedNode = try XMLDocument(data: CloudClient.folderResourceXML(CloudClient.TreeNodeFields(id: "n1", type: "note", encodedName: "IA==", parent: "root", state: "trashed",
+            order: 999_999, created: 1, modified: 2, trashed: 5, restorePath: "uncategorized:///Dev"), latestSync: 3, now: 5), options: [.nodeLoadExternalEntitiesNever])
+        guard let trashed = trashedNode.rootElement()?.first("nodeList")?.first("node"), trashed.value("state") == "trashed", trashed.value("trashedTime") == "5",
+              Data(base64Encoded: trashed.value("restorePath")).flatMap({ String(data: $0, encoding: .utf8) }) == "uncategorized:///Dev",
+              trashed.value("name") == "IA==", trashed.value("createdTime") == "1", trashed.value("requestDevice").contains("deviceName") else { throw NotesError.message("Trash request mismatch.") }
+        var inTrash = NoteRecord(id: "t", resourceID: "r", commit: "c", modified: 0, locked: false, encrypted: false)
+        inTrash.trashed = true; inTrash.trashedTime = 1_000_000_000_000
+        guard inTrash.daysLeftInTrash(now: Date(timeIntervalSince1970: 1_000_000_000 + 2.5 * 86_400)) == 28,
+              inTrash.daysLeftInTrash(now: Date(timeIntervalSince1970: 1_000_000_000 + 40 * 86_400)) == 0 else { throw NotesError.message("Trash days mismatch.") }
         let inkFixture = Data(base64Encoded:"/////wQAAACgDwAADQAAAAAADQAAAAEIAEoAAAABAEIAAAABAAEMAgAAAAAAAAAkQAAAAAAAADRAAAAAAAAAPkAAAAAAAABEQAAAAD8AAEA/AAAAAAoAAAACAFY0Ev8AAEBA")!
         let ink = try InkStroke(inkFixture)
         guard ink.points.count == 2, ink.points[1] == CGPoint(x: 30, y: 40), ink.color == 0xff123456 else { throw NotesError.message("Drawing coordinates or color mismatch.") }

@@ -30,6 +30,9 @@ enum CommandLineTool {
       new TITLE [--folder PATH] [--body TEXT | --body-file PATH|-]
                                      Create a text note in Samsung Cloud from the template
       template NOTE                  Copy new notes' structure from NOTE instead of the automatic choice
+      trash NOTE                     Move a note to the Trash (Samsung Notes empties it after 30 days)
+      restore NOTE                   Bring a note back from the Trash to its folder
+      delete NOTE                    Delete a note that is in the Trash for good
       mkdir PATH                     Create a folder in Samsung Cloud, e.g. "Dev/New ideas"
       export NOTE DIRECTORY          Write NOTE.samsungnote (original XML, text, attachments)
       drawing NOTE OUTPUT.pdf        Write the approximate handwriting preview
@@ -124,6 +127,7 @@ enum CommandLineTool {
         case "show": try arguments(1, "NOTE [--xml]"); try await show(options.positional[0], options)
         case "edit": try arguments(1, "NOTE [--title TEXT] [--body TEXT | --body-file PATH|-]"); try await edit(options.positional[0], options)
         case "mkdir": try arguments(1, "PATH"); try await mkdir(options.positional[0], options)
+        case "trash", "restore", "delete": try arguments(1, "NOTE"); try await change(command, options.positional[0], options)
         case "new": try arguments(1, "TITLE [--folder PATH] [--body TEXT | --body-file PATH|-]"); try await new(options.positional[0], options)
         case "template":
             try arguments(1, "NOTE")
@@ -269,6 +273,27 @@ enum CommandLineTool {
         try output(notes, library: library, options)
     }
 
+    /// trash, restore or delete (for good, Trash only) the note NOTE names.
+    @MainActor static func change(_ command: String, _ query: String, _ options: Options) async throws {
+        if options.offline { throw Failure(message: "\(command) writes to Samsung Cloud; run it without --offline.", code: 2) }
+        let library = try await Library.load(offline: false, strict: true)
+        let note = try library.resolve(query)
+        let title = note.title.isEmpty ? note.id : note.title
+        switch command {
+        case "trash":
+            guard !note.trashed else { print("\"\(title)\" is already in the Trash."); return }
+            try await library.client.setNoteState(note, to: "trashed", folders: library.index.folders)
+            print("Moved \"\(title)\" to the Trash. Samsung Notes deletes it for good after 30 days; scnotes restore brings it back.")
+        case "restore":
+            guard note.trashed else { print("\"\(title)\" is not in the Trash."); return }
+            try await library.client.setNoteState(note, to: "normal", folders: library.index.folders)
+            print("Restored \"\(title)\".")
+        default:
+            try await library.client.deleteNote(note, folders: library.index.folders)
+            print("Deleted \"\(title)\" for good.")
+        }
+    }
+
     /// Creates the last folder in PATH inside the folder the rest of PATH names (top level for a bare name).
     @MainActor static func mkdir(_ path: String, _ options: Options) async throws {
         if options.offline { throw Failure(message: "mkdir writes to Samsung Cloud; run it without --offline.", code: 2) }
@@ -326,7 +351,8 @@ enum CommandLineTool {
     @MainActor static func describe(_ note: NoteRecord, library: Library) -> [String: Any] {
         ["id": note.id, "title": note.title, "snippet": note.snippet, "folderId": note.folder, "folder": library.folderName(note.folder), "folderPath": library.folderPath(note.folder),
          "modified": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: note.modified / 1000)),
-         "revision": note.commit, "trashed": note.trashed, "locked": note.locked || note.encrypted]
+         "revision": note.commit, "trashed": note.trashed, "locked": note.locked || note.encrypted,
+         "daysLeftInTrash": note.daysLeftInTrash().map { $0 as Any } ?? NSNull()]
     }
 
     @MainActor static func show(_ query: String, _ options: Options) async throws {

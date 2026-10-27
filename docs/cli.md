@@ -34,6 +34,9 @@ If the directory is not on your `PATH`, the installer prints the line to add to 
 | `scnotes edit NOTE [--title TEXT] [--body TEXT \| --body-file PATH\|-]` | Replace the title and/or typed text and save to Samsung Cloud |
 | `scnotes new TITLE [--folder PATH] [--body TEXT \| --body-file PATH\|-]` | Create a text note in Samsung Cloud, built from the template |
 | `scnotes template NOTE` | Copy new notes' structure from NOTE instead of the automatically chosen note (kept only on this Mac) |
+| `scnotes trash NOTE` | Move a note to the Trash; Samsung Notes deletes it for good after 30 days |
+| `scnotes restore NOTE` | Bring a note back from the Trash to the folder it was in |
+| `scnotes delete NOTE` | Delete a note that is already in the Trash from Samsung Cloud for good; other devices keep their copy in their own Trash until it is emptied |
 | `scnotes mkdir PATH` | Create a folder in Samsung Cloud; `Dev/New ideas` creates *New ideas* inside *Dev* |
 | `scnotes export NOTE DIRECTORY` | Write `NOTE.samsungnote/` with `document.xml`, `text.txt` and attachments |
 | `scnotes drawing NOTE OUTPUT.pdf` | Write the approximate handwriting preview |
@@ -56,7 +59,7 @@ printf 'Milk\nEggs\n' | scnotes edit "Shopping list" --body-file -
 
 If the app holds an unsaved draft for the same note, `edit` stops rather than overwrite it. Save or reload the note in the app, or pass `--discard-draft`; the draft is archived under `DraftHistory/` either way.
 
-The same limits as the app apply: editing replaces formatting in the main text object, drawings and attachments are retained, and deleting notes is not supported. `new` creates plain-text notes only. Their page structure is copied from the simplest plain-text note in the cache (one page, no attachments or drawings); its title, text and span data are never reused. `mkdir` creates folders only; it does not rename, move or delete them.
+The same limits as the app apply: editing replaces formatting in the main text object, drawings and attachments are retained, and notes are deleted the way Samsung Notes does it: first to the Trash (`trash`), then for good from the Trash only (`delete`). `new` creates plain-text notes only. Their page structure is copied from the simplest plain-text note in the cache (one page, no attachments or drawings); its title, text and span data are never reused. `mkdir` creates folders only; it does not rename, move or delete them.
 
 ## Diagnostics
 

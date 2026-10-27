@@ -68,6 +68,7 @@ struct NotesView: View {
     @State var newFolderName = ""
     @State var creatingNote = false
     @State var newNoteTitle = ""
+    @State var pendingDelete: String?
     var body: some View {
         VStack(spacing: 0) {
         NavigationSplitView {
@@ -120,8 +121,33 @@ struct NotesView: View {
                     HStack { Text(note.locked ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
                         if note.locked || note.encrypted { Image(systemName: "lock") } }
                     Text(note.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    Text(Date(timeIntervalSince1970: note.modified / 1000), style: .date).font(.caption2).foregroundStyle(.secondary)
+                    if let days = note.daysLeftInTrash() {
+                        Text(days == 1 ? "Deleted in 1 day" : "Deleted in \(days) days").font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        Text(Date(timeIntervalSince1970: note.modified / 1000), style: .date).font(.caption2).foregroundStyle(.secondary)
+                    }
                 }.padding(.vertical, 5).tag(note.id)
+                .contextMenu {
+                    if note.trashed {
+                        Button("Restore") { Task { await model.change(note: note.id, .restore) } }
+                        Button("Delete Forever…", role: .destructive) { pendingDelete = note.id }
+                    } else {
+                        Button("Move to Trash") { Task { await model.change(note: note.id, .trash) } }
+                    }
+                }
+            }
+            .onDeleteCommand {
+                guard let id = model.selection, let note = model.notes.first(where: { $0.id == id }) else { return }
+                if note.trashed { pendingDelete = id } else { Task { await model.change(note: id, .trash) } }
+            }
+            .confirmationDialog("Delete this note forever?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
+                Button("Delete Forever", role: .destructive) {
+                    if let id = pendingDelete { Task { await model.change(note: id, .deleteForever) } }
+                    pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: {
+                Text("It is removed from Samsung Cloud and can't be restored here. Samsung Notes on your other devices keeps its own copy in its Trash until that Trash is emptied (after 30 days, or by you).")
             }
             .searchable(text: $model.search, prompt: "Search notes")
             .toolbar {

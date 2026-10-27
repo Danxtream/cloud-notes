@@ -108,6 +108,18 @@ Samsung Notes 4.4.45 for Android uploads a brand-new text note in two steps:
 
 Notes with attachments also register files with `POST /samsungnotes/v2/binaries/createUploadURLs` and upload them first; this client creates text notes only. Rather than reproduce the full attribute and page structure, it builds new notes from a template: the simplest plain-text note already in the cache (one page, no attachments or drawings), or one chosen with `scnotes template`. Every id in the template is replaced consistently, its title, text and span order data are replaced or removed, rewritten elements get new SHA-256 hashes, and times are set to now. The template stays on the device.
 
+## Trash and delete
+
+Samsung Notes keeps deleted notes in its Trash for 30 days, then deletes them for good on the device. Both steps change the note's tree node with `PATCH /folder`:
+
+- **Move to Trash:** `state` `trashed`, `parentFolderNodeId` `root`, `trashedTime` now, and `restorePath` = Base64 of `uncategorized:///` plus the folder path the note was in (for example `uncategorized:///Dev/Repos`). For states other than `normal`, `requestDevice` also carries a Base64 `deviceName`.
+- **Restore:** `state` `normal`, the parent folder found from `restorePath` (the top level if that folder is gone), `trashedTime` 0.
+- **Delete for good:** `state` `deleted`, then `DELETE /samsungnotes/v1/notes/{serverId}?syncModifiedTime=<the note's last known server time>`. Without the parameter Samsung answers 400; a stale time gets 409 (the note changed elsewhere) and 404 means it is already gone.
+
+Samsung Notes never erases a local note because the server deleted it: when a note's node arrives as `deleted`, the phone moves its own copy to its Trash (its log shows `SyncSDocxTrashDeletedLocalNote`) and keeps it there until its 30-day clean-up or until the Trash is emptied on the phone. A note deleted for good from this client therefore leaves Samsung Cloud at once but stays in the Trash of other devices for a while, as it would after a delete from another Samsung device.
+
+This client deletes for good only notes that are already in the Trash. Each change is verified by reading the tree again. Checked live: a note moved to the Trash and restored from a Mac appeared in and left the Trash of Samsung Notes on a Galaxy S23+; a note created, trashed and deleted from a Mac was gone from Samsung Cloud afterwards, while the phone kept its copy in its Trash as described above.
+
 "Math notes" (`math:///`) and "Screen off memo" (`screenOffMemo:///`) are built-in folders that Samsung Notes creates itself; the client does not create subfolders in them.
 
 ## Remaining interoperability work

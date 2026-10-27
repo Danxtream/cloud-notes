@@ -97,6 +97,13 @@ struct NoteRecord: Identifiable, Codable {
     var snippet: String = ""
     var folder: String = ""
     var trashed: Bool = false
+    /// When the note was moved to the Trash (milliseconds), from its tree node.
+    var trashedTime: Double? = nil
+    /// Days until Samsung Notes deletes a trashed note for good: it empties its Trash after 30 days.
+    func daysLeftInTrash(now: Date = Date()) -> Int? {
+        guard trashed, let moved = trashedTime, moved > 0 else { return nil }
+        return max(0, 30 - Int((now.timeIntervalSince1970 * 1000 - moved) / 86_400_000))
+    }
 }
 struct FolderRecord: Identifiable, Codable { var id: String; var name: String; var parent: String }
 /// A folder and its subfolders for outline views. `children` is nil for a leaf, so no disclosure arrow is shown.
@@ -413,6 +420,7 @@ final class CloudClient {
                 if let id = notes.values.first(where: { $0.resourceID == node.attr("id") })?.id {
                     notes[id]?.folder = node.value("parentFolderNodeId")
                     notes[id]?.trashed = state == "trashed"
+                    notes[id]?.trashedTime = Double(node.value("trashedTime"))
                     if state == "deleted" { notes.removeValue(forKey: id) }
                 }
             }
@@ -429,17 +437,50 @@ final class CloudClient {
     /// last change point, so the node is stamped with the current time and the resource with the newest time in the
     /// tree. The colour is Samsung's default (-1).
     static func treeNodeXML(id: String, type: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64) -> Data {
+        folderResourceXML(TreeNodeFields(id: id, type: type, encodedName: Data(name.utf8).base64EncodedString(), parent: parent,
+                                         order: order, created: now, modified: now), latestSync: latestSync, now: now)
+    }
+    /// One folder or note node as Samsung Notes writes it for `PATCH /folder`.
+    struct TreeNodeFields {
+        var id: String
+        var type: String
+        var encodedName: String
+        var parent: String
+        var state = "normal"
+        var order: Int
+        var color = -1
+        var created: Int64
+        var modified: Int64
+        var trashed: Int64 = 0
+        /// Where Restore puts a trashed node, e.g. "uncategorized:///Dev/Repos"; sent Base64-encoded.
+        var restorePath: String? = nil
+    }
+    /// A `FolderResource` holding `node`, with its fields in Samsung Notes' order. The node is stamped with the current
+    /// time (`syncModifiedTime`) and, like Samsung Notes, names the device for changes other than normal ones.
+    static func folderResourceXML(_ node: TreeNodeFields, latestSync: Int64, now: Int64) -> Data {
         func escaped(_ value: String) -> String {
             value.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
         }
-        let device = (try? JSONSerialization.data(withJSONObject: ["model": ClientPlatform.model, "ver": appShortVersion], options: [.sortedKeys]))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let node = "<node id=\"\(escaped(id))\" type=\"\(escaped(type))\"><parentFolderNodeId>\(escaped(parent))</parentFolderNodeId>"
-            + "<syncModifiedTime>\(now)</syncModifiedTime><createdTime>\(now)</createdTime><lastModifiedTime>\(now)</lastModifiedTime>"
-            + "<name>\(Data(name.utf8).base64EncodedString())</name><state>normal</state><trashedTime>0</trashedTime><color>-1</color>"
-            + "<order>\(order)</order><requestTime>\(now)</requestTime><requestDevice>\(escaped(device))</requestDevice></node>"
-        return Data("<?xml version=\"1.0\" encoding=\"UTF-8\"?><FolderResource><syncModifiedTime>\(max(latestSync, now))</syncModifiedTime><nodeList>\(node)</nodeList></FolderResource>".utf8)
+        var device = ["model": ClientPlatform.model, "ver": appShortVersion]
+        if node.state != "normal" { device["deviceName"] = Data(ClientPlatform.model.utf8).base64EncodedString() }
+        let deviceJSON = (try? JSONSerialization.data(withJSONObject: device, options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let restore = node.restorePath.map { "<restorePath>\(Data($0.utf8).base64EncodedString())</restorePath>" } ?? ""
+        let xml = "<node id=\"\(escaped(node.id))\" type=\"\(escaped(node.type))\"><parentFolderNodeId>\(escaped(node.parent))</parentFolderNodeId>"
+            + "<syncModifiedTime>\(now)</syncModifiedTime><createdTime>\(node.created)</createdTime><lastModifiedTime>\(node.modified)</lastModifiedTime>"
+            + "<name>\(escaped(node.encodedName))</name><state>\(escaped(node.state))</state>\(restore)<trashedTime>\(node.trashed)</trashedTime>"
+            + "<color>\(node.color)</color><order>\(node.order)</order><requestTime>\(now)</requestTime><requestDevice>\(escaped(deviceJSON))</requestDevice></node>"
+        return Data("<?xml version=\"1.0\" encoding=\"UTF-8\"?><FolderResource><syncModifiedTime>\(max(latestSync, now))</syncModifiedTime><nodeList>\(xml)</nodeList></FolderResource>".utf8)
+    }
+    /// The restore path Samsung Notes records for something in `folder` ("root" for the top level).
+    static func restorePath(of folder: String, folders: [FolderRecord]) -> String {
+        "uncategorized:///" + (folder == "root" ? "" : folders.path(of: folder))
+    }
+    /// The folder a restore path points to, or "root" when it names the top level or a folder that no longer exists.
+    static func restoreParent(_ restorePath: String, folders: [FolderRecord]) -> String {
+        guard restorePath.hasPrefix("uncategorized:///") else { return "root" }
+        let path = String(restorePath.dropFirst("uncategorized:///".count))
+        return path.isEmpty ? "root" : folders.first { folders.path(of: $0.id) == path }?.id ?? "root"
     }
     /// The account's whole folder tree (folder and note nodes) exactly as Samsung returns it.
     func folderTreeXML() async throws -> Data {
@@ -506,6 +547,47 @@ final class CloudClient {
         let fresh = try await download(serverID)
         guard fresh.title == title, fresh.body == body else { throw NotesError.message("Samsung created the note, but its readback differs. Refresh and check it before editing.") }
         return fresh
+    }
+    /// Moves a note to the Trash ("trashed"), back out of it ("normal") or marks it deleted ("deleted") by rewriting its
+    /// tree node as Samsung Notes does: a trashed note sits at the top level with its folder kept in `restorePath`, and
+    /// Samsung Notes deletes it for good 30 days after `trashedTime`. A restored note goes back to that folder, or to the
+    /// top level if the folder is gone. The tree is read again to confirm the change.
+    func setNoteState(_ note: NoteRecord, to state: String, folders: [FolderRecord]) async throws {
+        let xml = try XMLDocument(data: try await folderTreeXML(), options: [.nodeLoadExternalEntitiesNever])
+        let nodes = xml.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? []
+        guard let node = nodes.first(where: { $0.attr("id") == note.resourceID && $0.attr("type") == "note" }) else {
+            throw NotesError.message("Samsung Cloud no longer lists this note. Refresh and try again.")
+        }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let saved = Data(base64Encoded: node.value("restorePath")).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        var fields = TreeNodeFields(id: note.resourceID, type: "note", encodedName: node.value("name"), parent: node.value("parentFolderNodeId"),
+                                    state: state, order: Int(node.value("order")) ?? 999_999, color: Int(node.value("color")) ?? -1,
+                                    created: Int64(node.value("createdTime")) ?? now, modified: Int64(node.value("lastModifiedTime")) ?? now,
+                                    trashed: Int64(node.value("trashedTime")) ?? 0, restorePath: saved.isEmpty ? nil : saved)
+        switch state {
+        case "trashed": fields.restorePath = Self.restorePath(of: fields.parent, folders: folders); fields.parent = "root"; fields.trashed = now
+        case "normal": fields.parent = Self.restoreParent(saved, folders: folders); fields.restorePath = Self.restorePath(of: fields.parent, folders: folders); fields.trashed = 0
+        default: fields.parent = "root"; if fields.trashed == 0 { fields.trashed = now }
+        }
+        let latest = nodes.compactMap { Int64($0.value("syncModifiedTime")) }.max() ?? 0
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: Self.folderResourceXML(fields, latestSync: latest, now: now),
+                              contentType: "application/xml;Charset=utf-8")
+        guard try await treeNodes().contains(where: { $0.id == note.resourceID && $0.state == state }) else {
+            throw NotesError.message("Samsung accepted the change, but the note's state did not update. Refresh and check it.")
+        }
+    }
+    /// Deletes a note in the Trash for good, as Samsung Notes does from its Trash: the tree node becomes "deleted",
+    /// then the note itself is removed with `DELETE /notes/{id}?syncModifiedTime=…`. Notes outside the Trash are refused.
+    func deleteNote(_ note: NoteRecord, folders: [FolderRecord]) async throws {
+        guard note.trashed else { throw NotesError.message("Only notes in the Trash can be deleted for good. Move it to the Trash first.") }
+        try await setNoteState(note, to: "deleted", folders: folders)
+        try await deleteNoteResource(id: note.id, serverModified: Int64(note.modified))
+    }
+    /// `DELETE /notes/{id}`. Samsung requires the note's last known server time and refuses (409) when the note changed
+    /// since; 404 means it is already gone.
+    func deleteNoteResource(id: String, serverModified: Int64) async throws {
+        guard id.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else { throw NotesError.message("Invalid note identifier.") }
+        _ = try await request("/samsungnotes/v1/notes/\(id)?syncModifiedTime=\(serverModified)", method: "DELETE")
     }
     func download(_ id: String) async throws -> CloudDocument {
         guard id.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else { throw NotesError.message("Invalid note identifier.") }
