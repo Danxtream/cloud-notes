@@ -436,17 +436,28 @@ final class CloudClient {
         return CloudIndex(notes: notes.values.sorted { $0.modified > $1.modified }, folders: folders.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
     }
     /// The `FolderResource` body Samsung Notes sends to create one folder with `PATCH /folder`; `order` places it after its siblings.
-    static func newFolderXML(id: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64) -> Data {
-        treeNodeXML(id: id, type: "folder", name: name, parent: parent, order: order, latestSync: latestSync, now: now)
+    static func newFolderXML(id: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64, ancestors: [TreeNodeFields] = []) -> Data {
+        treeNodeXML(id: id, type: "folder", name: name, parent: parent, order: order, latestSync: latestSync, now: now, ancestors: ancestors)
     }
     /// A `FolderResource` holding one new tree node, as Samsung Notes 4.4.45 for Android sends it with `PATCH /folder`
     /// for a new folder, or for a new note before the note itself is uploaded (a note's node places it in a folder).
     /// Samsung stores the node's `syncModifiedTime` as sent and other devices only download nodes newer than their
     /// last change point, so the node is stamped with the current time and the resource with the newest time in the
-    /// tree. The colour is Samsung's default (-1).
-    static func treeNodeXML(id: String, type: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64) -> Data {
-        folderResourceXML(TreeNodeFields(id: id, type: type, encodedName: Data(name.utf8).base64EncodedString(), parent: parent,
-                                         order: order, created: now, modified: now), latestSync: latestSync, now: now)
+    /// tree. The colour is Samsung's default (-1). `ancestors` are the folders above `parent` (see `ancestors(of:in:)`).
+    static func treeNodeXML(id: String, type: String, name: String, parent: String, order: Int, latestSync: Int64, now: Int64, ancestors: [TreeNodeFields] = []) -> Data {
+        folderResourceXML([TreeNodeFields(id: id, type: type, encodedName: Data(name.utf8).base64EncodedString(), parent: parent,
+                                          order: order, created: now, modified: now)] + ancestors, latestSync: latestSync, now: now)
+    }
+    /// The folders above `parent`, nearest first, as Samsung Notes sends them along with a node it places inside them:
+    /// Samsung refuses a folder whose parent is not in the same request ("Parent node must exist"). Stops at the top
+    /// level, at a folder missing from `nodes`, or at a loop.
+    static func ancestors(of parent: String, in nodes: [XMLElement]) -> [TreeNodeFields] {
+        var chain: [TreeNodeFields] = [], id = parent
+        while id != "root", !chain.contains(where: { $0.id == id }),
+              let node = nodes.first(where: { $0.attr("id") == id && $0.attr("type") == "folder" }) {
+            chain.append(TreeNodeFields(node)); id = chain[chain.count - 1].parent
+        }
+        return chain
     }
     /// One folder or note node as Samsung Notes writes it for `PATCH /folder`.
     struct TreeNodeFields {
@@ -463,21 +474,24 @@ final class CloudClient {
         /// Where Restore puts a trashed node, e.g. "uncategorized:///Dev/Repos"; sent Base64-encoded.
         var restorePath: String? = nil
     }
-    /// A `FolderResource` holding `node`, with its fields in Samsung Notes' order. The node is stamped with the current
-    /// time (`syncModifiedTime`) and, like Samsung Notes, names the device for changes other than normal ones.
-    static func folderResourceXML(_ node: TreeNodeFields, latestSync: Int64, now: Int64) -> Data {
+    /// A `FolderResource` holding `nodes`, with their fields in Samsung Notes' order. Every node is stamped with the
+    /// current time (`syncModifiedTime`), as Samsung Notes also stamps the parent folders it sends along with a change,
+    /// and, like Samsung Notes, names the device for changes other than normal ones.
+    static func folderResourceXML(_ nodes: [TreeNodeFields], latestSync: Int64, now: Int64) -> Data {
         func escaped(_ value: String) -> String {
             value.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
         }
-        var device = ["model": ClientPlatform.model, "ver": appShortVersion]
-        if node.state != "normal" { device["deviceName"] = Data(ClientPlatform.model.utf8).base64EncodedString() }
-        let deviceJSON = (try? JSONSerialization.data(withJSONObject: device, options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        let restore = node.restorePath.map { "<restorePath>\(Data($0.utf8).base64EncodedString())</restorePath>" } ?? ""
-        let xml = "<node id=\"\(escaped(node.id))\" type=\"\(escaped(node.type))\"><parentFolderNodeId>\(escaped(node.parent))</parentFolderNodeId>"
-            + "<syncModifiedTime>\(now)</syncModifiedTime><createdTime>\(node.created)</createdTime><lastModifiedTime>\(node.modified)</lastModifiedTime>"
-            + "<name>\(escaped(node.encodedName))</name><state>\(escaped(node.state))</state>\(restore)<trashedTime>\(node.trashed)</trashedTime>"
-            + "<color>\(node.color)</color><order>\(node.order)</order><requestTime>\(now)</requestTime><requestDevice>\(escaped(deviceJSON))</requestDevice></node>"
+        let xml = nodes.map { node in
+            var device = ["model": ClientPlatform.model, "ver": appShortVersion]
+            if node.state != "normal" { device["deviceName"] = Data(ClientPlatform.model.utf8).base64EncodedString() }
+            let deviceJSON = (try? JSONSerialization.data(withJSONObject: device, options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let restore = node.restorePath.map { "<restorePath>\(Data($0.utf8).base64EncodedString())</restorePath>" } ?? ""
+            return "<node id=\"\(escaped(node.id))\" type=\"\(escaped(node.type))\"><parentFolderNodeId>\(escaped(node.parent))</parentFolderNodeId>"
+                + "<syncModifiedTime>\(now)</syncModifiedTime><createdTime>\(node.created)</createdTime><lastModifiedTime>\(node.modified)</lastModifiedTime>"
+                + "<name>\(escaped(node.encodedName))</name><state>\(escaped(node.state))</state>\(restore)<trashedTime>\(node.trashed)</trashedTime>"
+                + "<color>\(node.color)</color><order>\(node.order)</order><requestTime>\(now)</requestTime><requestDevice>\(escaped(deviceJSON))</requestDevice></node>"
+        }.joined()
         return Data("<?xml version=\"1.0\" encoding=\"UTF-8\"?><FolderResource><syncModifiedTime>\(max(latestSync, now))</syncModifiedTime><nodeList>\(xml)</nodeList></FolderResource>".utf8)
     }
     /// The restore path Samsung Notes records for something in `folder` ("root" for the top level).
@@ -495,13 +509,17 @@ final class CloudClient {
         var components = URLComponents(); components.queryItems = [URLQueryItem(name: "lastChangePoint", value: Self.initialCursor("FOLDER"))]
         return try await request("/samsungnotes/v1/folder/changes?" + components.percentEncodedQuery!)
     }
-    /// The folder and note nodes of the account's tree, with names decoded.
-    func treeNodes() async throws -> [(id: String, type: String, parent: String, state: String, name: String, synced: Int64)] {
+    /// The folder and note nodes of the account's tree, as Samsung returns them.
+    func treeElements() async throws -> [XMLElement] {
         let xml = try XMLDocument(data: try await folderTreeXML(), options: [.nodeLoadExternalEntitiesNever])
-        return (xml.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? []).map {
-            (id: $0.attr("id"), type: $0.attr("type"), parent: $0.value("parentFolderNodeId"), state: $0.value("state"),
-             name: decodedCloudName($0.value("name")), synced: Int64($0.value("syncModifiedTime")) ?? 0)
-        }
+        return xml.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? []
+    }
+    typealias TreeNode = (id: String, type: String, parent: String, state: String, name: String, synced: Int64)
+    /// The folder and note nodes of the account's tree, with names decoded.
+    func treeNodes() async throws -> [TreeNode] { try await treeElements().map(Self.treeNode) }
+    static func treeNode(_ node: XMLElement) -> TreeNode {
+        (id: node.attr("id"), type: node.attr("type"), parent: node.value("parentFolderNodeId"), state: node.value("state"),
+         name: decodedCloudName(node.value("name")), synced: Int64(node.value("syncModifiedTime")) ?? 0)
     }
     /// Creates a folder under `parent` ("root" for the top level) the way Samsung Notes does, then reads the
     /// tree back to confirm Samsung stored it. Built-in folders such as Math notes cannot hold subfolders.
@@ -512,7 +530,8 @@ final class CloudClient {
             throw NotesError.message("Folder names need 1 to 100 characters and no \"/\".")
         }
         guard !parent.contains(":///") else { throw NotesError.message("Built-in folders cannot contain subfolders.") }
-        let tree = try await treeNodes()
+        let elements = try await treeElements()
+        let tree = elements.map(Self.treeNode)
         let folders = tree.filter { $0.type == "folder" && $0.state == "normal" }
         if parent != "root", !folders.contains(where: { $0.id == parent }) { throw NotesError.message("The parent folder no longer exists. Refresh and try again.") }
         let siblings = folders.filter { $0.parent == parent }
@@ -521,7 +540,8 @@ final class CloudClient {
         }
         let id = UUID().uuidString.lowercased()
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let body = Self.newFolderXML(id: id, name: name, parent: parent, order: siblings.count, latestSync: tree.map(\.synced).max() ?? 0, now: now)
+        let body = Self.newFolderXML(id: id, name: name, parent: parent, order: siblings.count, latestSync: tree.map(\.synced).max() ?? 0, now: now,
+                                     ancestors: Self.ancestors(of: parent, in: elements))
         _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
         guard try await treeNodes().contains(where: { $0.id == id && $0.state == "normal" && $0.name == name }) else {
             throw NotesError.message("Samsung accepted the request, but the new folder did not appear. Refresh before trying again.")
@@ -534,7 +554,8 @@ final class CloudClient {
     func createNote(title rawTitle: String, body: String, in folder: String, template: Data) async throws -> CloudDocument {
         let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !folder.contains(":///") else { throw NotesError.message("Built-in folders cannot hold new notes from this app.") }
-        let tree = try await treeNodes()
+        let elements = try await treeElements()
+        let tree = elements.map(Self.treeNode)
         if folder != "root", !tree.contains(where: { $0.id == folder && $0.type == "folder" && $0.state == "normal" }) {
             throw NotesError.message("That folder no longer exists. Refresh and try again.")
         }
@@ -543,7 +564,7 @@ final class CloudClient {
         let millis = Int64(now.timeIntervalSince1970 * 1000)
         // Samsung Notes places a new note (order 999999 = after existing notes) before uploading it.
         let node = Self.treeNodeXML(id: id, type: "note", name: title.isEmpty ? " " : title, parent: folder, order: 999_999,
-                                    latestSync: tree.map(\.synced).max() ?? 0, now: millis)
+                                    latestSync: tree.map(\.synced).max() ?? 0, now: millis, ancestors: Self.ancestors(of: folder, in: elements))
         _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: node, contentType: "application/xml;Charset=utf-8")
         let boundary = "SamsungNotesMac-" + UUID().uuidString
         var payload = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"noteResource\"\r\nContent-Type: application/xml\r\n\r\n".utf8)
@@ -561,25 +582,22 @@ final class CloudClient {
     /// Samsung Notes deletes it for good 30 days after `trashedTime`. A restored note goes back to that folder, or to the
     /// top level if the folder is gone. The tree is read again to confirm the change.
     func setNoteState(_ note: NoteRecord, to state: String, folders: [FolderRecord]) async throws {
-        let xml = try XMLDocument(data: try await folderTreeXML(), options: [.nodeLoadExternalEntitiesNever])
-        let nodes = xml.rootElement()?.first("folderResource")?.first("nodeList")?.elements(forName: "node") ?? []
+        let nodes = try await treeElements()
         guard let node = nodes.first(where: { $0.attr("id") == note.resourceID && $0.attr("type") == "note" }) else {
             throw NotesError.message("Samsung Cloud no longer lists this note. Refresh and try again.")
         }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let saved = Data(base64Encoded: node.value("restorePath")).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        var fields = TreeNodeFields(id: note.resourceID, type: "note", encodedName: node.value("name"), parent: node.value("parentFolderNodeId"),
-                                    state: state, order: Int(node.value("order")) ?? 999_999, color: Int(node.value("color")) ?? -1,
-                                    created: Int64(node.value("createdTime")) ?? now, modified: Int64(node.value("lastModifiedTime")) ?? now,
-                                    trashed: Int64(node.value("trashedTime")) ?? 0, restorePath: saved.isEmpty ? nil : saved)
+        var fields = TreeNodeFields(node)
+        let saved = fields.restorePath ?? ""
+        fields.state = state
         switch state {
         case "trashed": fields.restorePath = Self.restorePath(of: fields.parent, folders: folders); fields.parent = "root"; fields.trashed = now
         case "normal": fields.parent = Self.restoreParent(saved, folders: folders); fields.restorePath = Self.restorePath(of: fields.parent, folders: folders); fields.trashed = 0
         default: fields.parent = "root"; if fields.trashed == 0 { fields.trashed = now }
         }
         let latest = nodes.compactMap { Int64($0.value("syncModifiedTime")) }.max() ?? 0
-        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: Self.folderResourceXML(fields, latestSync: latest, now: now),
-                              contentType: "application/xml;Charset=utf-8")
+        let body = Self.folderResourceXML([fields] + Self.ancestors(of: fields.parent, in: nodes), latestSync: latest, now: now)
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
         guard try await treeNodes().contains(where: { $0.id == note.resourceID && $0.state == state }) else {
             throw NotesError.message("Samsung accepted the change, but the note's state did not update. Refresh and check it.")
         }
@@ -631,6 +649,17 @@ final class CloudClient {
         let (data, response) = try await transport.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw NotesError.message("The attachment download failed. Reload the note to refresh its download URL.") }
         return data
+    }
+}
+
+extension CloudClient.TreeNodeFields {
+    /// A node exactly as Samsung's tree lists it, its name still Base64-encoded.
+    init(_ node: XMLElement) {
+        let restore = Data(base64Encoded: node.value("restorePath")).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        self.init(id: node.attr("id"), type: node.attr("type"), encodedName: node.value("name"), parent: node.value("parentFolderNodeId"),
+                  state: node.value("state"), order: Int(node.value("order")) ?? 999_999, color: Int(node.value("color")) ?? -1,
+                  created: Int64(node.value("createdTime")) ?? 0, modified: Int64(node.value("lastModifiedTime")) ?? 0,
+                  trashed: Int64(node.value("trashedTime")) ?? 0, restorePath: restore.isEmpty ? nil : restore)
     }
 }
 

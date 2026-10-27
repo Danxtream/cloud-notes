@@ -65,12 +65,27 @@ enum SelfTest {
         catch let error as NotesError { if error.localizedDescription == "A template with attachments was accepted." { throw error } }
         guard try XMLDocument(data: CloudClient.newFolderXML(id: "f2", name: "Later", parent: "root", order: 0, latestSync: 42, now: 99), options: [.nodeLoadExternalEntitiesNever])
               .rootElement()?.value("syncModifiedTime") == "99" else { throw NotesError.message("New folder request time mismatch.") }
+        func treeNode(_ id: String, _ type: String, _ parent: String, _ name: String) -> String {
+            "<node id=\"\(id)\" type=\"\(type)\"><parentFolderNodeId>\(parent)</parentFolderNodeId><syncModifiedTime>5</syncModifiedTime><createdTime>1</createdTime>"
+            + "<lastModifiedTime>2</lastModifiedTime><name>\(Data(name.utf8).base64EncodedString())</name><state>normal</state><trashedTime>0</trashedTime><color>-1</color><order>4</order></node>"
+        }
+        let treeXML = try XMLDocument(xmlString: "<r>" + treeNode("a", "folder", "root", "Dev") + treeNode("b", "folder", "a", "Repos") + treeNode("n", "note", "b", "Note")
+            + treeNode("x", "folder", "y", "Loop") + treeNode("y", "folder", "x", "Back") + "</r>", options: [.nodeLoadExternalEntitiesNever])
+        let treeNodes = treeXML.rootElement()?.elements(forName: "node") ?? []
+        let inRepos = try XMLDocument(data: CloudClient.newFolderXML(id: "f3", name: "Ideas", parent: "b", order: 0, latestSync: 42, now: 99,
+                                                                     ancestors: CloudClient.ancestors(of: "b", in: treeNodes)), options: [.nodeLoadExternalEntitiesNever])
+        let sent = inRepos.rootElement()?.first("nodeList")?.elements(forName: "node") ?? []
+        guard sent.map({ $0.attr("id") }) == ["f3", "b", "a"], sent.allSatisfy({ $0.value("syncModifiedTime") == "99" }),
+              decodedCloudName(sent[1].value("name")) == "Repos", sent[1].value("parentFolderNodeId") == "a", sent[2].value("parentFolderNodeId") == "root",
+              sent[1].value("createdTime") == "1", sent[1].value("lastModifiedTime") == "2", sent[1].value("order") == "4",
+              CloudClient.ancestors(of: "root", in: treeNodes).isEmpty, CloudClient.ancestors(of: "x", in: treeNodes).map(\.id) == ["x", "y"],
+              CloudClient.ancestors(of: "n", in: treeNodes).isEmpty else { throw NotesError.message("Parent folders in a nested request mismatch.") }
         let tree = [FolderRecord(id: "a", name: "Dev", parent: "root"), FolderRecord(id: "b", name: "Repos", parent: "a")]
         guard CloudClient.restorePath(of: "b", folders: tree) == "uncategorized:///Dev/Repos", CloudClient.restorePath(of: "root", folders: tree) == "uncategorized:///",
               CloudClient.restoreParent("uncategorized:///Dev/Repos", folders: tree) == "b", CloudClient.restoreParent("uncategorized:///Gone", folders: tree) == "root",
               CloudClient.restoreParent("uncategorized:///", folders: tree) == "root", CloudClient.restoreParent("", folders: tree) == "root" else { throw NotesError.message("Restore path mismatch.") }
-        let trashedNode = try XMLDocument(data: CloudClient.folderResourceXML(CloudClient.TreeNodeFields(id: "n1", type: "note", encodedName: "IA==", parent: "root", state: "trashed",
-            order: 999_999, created: 1, modified: 2, trashed: 5, restorePath: "uncategorized:///Dev"), latestSync: 3, now: 5), options: [.nodeLoadExternalEntitiesNever])
+        let trashedNode = try XMLDocument(data: CloudClient.folderResourceXML([CloudClient.TreeNodeFields(id: "n1", type: "note", encodedName: "IA==", parent: "root", state: "trashed",
+            order: 999_999, created: 1, modified: 2, trashed: 5, restorePath: "uncategorized:///Dev")], latestSync: 3, now: 5), options: [.nodeLoadExternalEntitiesNever])
         guard let trashed = trashedNode.rootElement()?.first("nodeList")?.first("node"), trashed.value("state") == "trashed", trashed.value("trashedTime") == "5",
               Data(base64Encoded: trashed.value("restorePath")).flatMap({ String(data: $0, encoding: .utf8) }) == "uncategorized:///Dev",
               trashed.value("name") == "IA==", trashed.value("createdTime") == "1", trashed.value("requestDevice").contains("deviceName") else { throw NotesError.message("Trash request mismatch.") }
