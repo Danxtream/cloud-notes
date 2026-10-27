@@ -252,11 +252,15 @@ final class CloudDocument {
             object.set("modifiedTime", String(Int64(now.timeIntervalSince1970 * 1_000_000)))
             object.set("hash", hash(object.bytes))
         }
-        let micros = String(Int64(now.timeIntervalSince1970 * 1_000_000))
+        let micros = String(Int64(now.timeIntervalSince1970 * 1_000_000)), millis = String(Int64(now.timeIntervalSince1970 * 1000))
         if let attrs = resource.first("attributes") {
             attrs.set("modifiedTime", micros); attrs.set("editTime", micros)
-            attrs.set("displayModifiedTime", String(Int64(now.timeIntervalSince1970 * 1000)))
+            attrs.set("displayModifiedTime", millis)
         }
+        // Samsung Notes downloads a changed note only when its syncModifiedTime is newer than the copy it has. With the
+        // old time it takes the new commit id but keeps its old text ("handleSameTimeNotes" in its log), so the edit
+        // never reaches the phone and a later edit there would overwrite it. Samsung stores the time as sent.
+        resource.set("syncModifiedTime", millis)
         return resource.bytes
     }
     /// Removes an object's span order data, which describes the styled runs of the text being replaced; the new text is

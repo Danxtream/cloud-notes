@@ -82,6 +82,7 @@ Versions before this fix wrote notes that the phone could not open; saving such 
 
 - `GET /samsungnotes/v1/notes/{serverId}/info` returns the current revision in an XML attribute.
 - `POST /samsungnotes/v1/notes/{serverId}/update` accepts multipart form data with an `application/xml` part named `noteResource`.
+- The uploaded `NoteResource` must carry the current time (ms) as `syncModifiedTime`; Samsung stores it as sent. Samsung Notes downloads a changed note only when that time is newer than its own copy's: with the old time it records the new revision's commit id but keeps its old text (`handleSameTimeNotes` in its log), so the edit never shows on the phone and a later edit there would replace it.
 
 The tested upload returned HTTP 201 and a `DefaultView` with resource/revision/timestamp information. A fresh download returned the edited text. The native Mac client also completed this write/readback flow, including accented, Japanese and emoji text.
 

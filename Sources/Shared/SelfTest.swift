@@ -220,7 +220,9 @@ enum SelfTest {
         try reopened.prune([])
         record.locked = false
         guard reopened.document(record) == nil else { throw NotesError.message("Removed note was retained in cache.") }
-        let updated = try XMLDocument(data: fixture.uploadXML(title: "Test title", body: "After 日本語 🚀"))
+        let updated = try XMLDocument(data: fixture.uploadXML(title: "Test title", body: "After 日本語 🚀", now: Date(timeIntervalSince1970: 1_800_000_000)))
+        // Other devices download the change only when its syncModifiedTime is newer than their copy's.
+        guard updated.rootElement()?.attr("syncModifiedTime") == "1800000000000" else { throw NotesError.message("A save would not reach other devices.") }
         guard updated.rootElement()?.attr("unknownField") == "retain",
               try updated.nodes(forXPath: "/noteResource/pageList/page/opaqueDrawing[@value='preserve']").count == 1,
               try updated.nodes(forXPath: "/noteResource/contentFileList/contentFile[@hash='original']").count == 1 else { throw NotesError.message("Opaque drawing or attachment metadata was lost.") }
