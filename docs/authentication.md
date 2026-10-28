@@ -41,5 +41,3 @@ The signing identity's private key stays in the user's login Keychain. The setup
 ## Account menu (1.0.0-rc.1)
 
 The signed-in sidebar shows the account email as a menu with Log out. Signing out cancels renewal, removes the native authorization and saved cloud session from Keychain and clears the visible account/library. Local drafts and cache remain. The welcome screen then offers Sign in with Samsung. This is an app logout, not a Samsung-wide browser/device sign-out or token revocation.
-
-See [the complete research note](reverse-engineering.md) for encryption fields, analysis landmarks and rejected routes.
