@@ -259,6 +259,12 @@ enum SelfTest {
         try reopened.prune([])
         record.locked = false
         guard reopened.document(record) == nil else { throw NotesError.message("Removed note was retained in cache.") }
+        // The sync queue: a draft with the cloud's text is up to date, one made from the newest revision is saved, and one
+        // from an older revision with other text is a conflict for the user, as Samsung Notes sets such notes aside.
+        guard DraftSync.decide(["title": fixture.title, "body": fixture.body, "commit": "older"], current: fixture) == .upToDate,
+              DraftSync.decide(["title": fixture.title, "body": "Changed here", "commit": fixture.commit], current: fixture) == .save,
+              DraftSync.decide(["title": fixture.title, "body": "Changed here", "commit": "older"], current: fixture) == .conflict
+        else { throw NotesError.message("Sync queue decision mismatch.") }
         let updated = try XMLDocument(data: fixture.uploadXML(title: "Test title", body: "After 日本語 🚀", now: Date(timeIntervalSince1970: 1_800_000_000)))
         // Other devices download the change only when its syncModifiedTime is newer than their copy's.
         guard updated.rootElement()?.attr("syncModifiedTime") == "1800000000000" else { throw NotesError.message("A save would not reach other devices.") }

@@ -4,6 +4,7 @@ import FoundationXML
 #endif
 import CryptoKit
 import Combine
+import Network
 
 @MainActor final class NotesModel: ObservableObject {
     @Published var notes: [NoteRecord] = []
@@ -19,6 +20,15 @@ import Combine
     @Published var status = "Connect your Samsung account to load your notes."
     @Published var busy = false
     @Published var draftConflict = false
+    /// Notes with a local draft not yet saved to Samsung Cloud (see `syncPending`).
+    @Published var pending: Set<String> = []
+    /// Notes changed both here and on another device since the draft was made; the user chooses a version.
+    @Published var conflicted: Set<String> = []
+    /// Whether this device has a network connection.
+    @Published var online = true
+    private var pathMonitor: NWPathMonitor?
+    private var retryTask: Task<Void, Never>?
+    private var syncing = false
     @Published var error: String?
     /// Cloud saves under way; autosave uploads in the background, so editing never waits for them.
     @Published var savesInFlight = 0
@@ -71,8 +81,117 @@ import Combine
             cache = try NoteCache(session: session)
             restoreCache()
             if let id = selection { await open(id) }
-            if !cacheOnly { await refresh() }
+            watchNetwork()
+            if !cacheOnly { await refreshAndSync() }
         } catch { status = error.localizedDescription }
+    }
+    /// Refreshes the library, then saves notes waiting to sync.
+    func refreshAndSync() async { await refresh(); await syncPending() }
+    /// Follows the network: when the connection comes back, the library is refreshed and waiting notes are saved.
+    private func watchNetwork() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let up = path.status == .satisfied
+            Task { @MainActor in
+                guard let self, self.online != up else { return }
+                self.online = up
+                if up { await self.refreshAndSync() }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "local.samsung-cloud-notes.network"))
+        pathMonitor = monitor
+    }
+    /// Saves every note with an unsaved local draft, oldest first, as Samsung Notes keeps its notes in step: the open
+    /// note through its usual save, others from the newest cloud revision when the draft was made from it. A note
+    /// another device changed meanwhile is marked conflicted for the user to settle (see `resolveConflict`). Runs at
+    /// start, after Refresh, when the network comes back and, while notes are still waiting, every two minutes.
+    func syncPending() async {
+        guard let client, online, !syncing, !busy else { return }
+        syncing = true; defer { syncing = false }
+        retryTask?.cancel()
+        for (id, values) in LocalStore.unsavedDrafts() {
+            guard notes.contains(where: { $0.id == id && !$0.trashed && !$0.locked && !$0.encrypted }), !uploading.contains(id) else { continue }
+            if id == selection { if dirty, !draftConflict { await save() }; continue }
+            do {
+                let current = try await client.download(id)
+                loaded[id] = current
+                switch DraftSync.decide(values, current: current) {
+                case .upToDate:
+                    try LocalStore.writeDraft(id: id, title: current.title, body: current.body, commit: current.commit, styled: current.bodyObject?.value("text"), saved: true)
+                    conflicted.remove(id)
+                case .conflict: conflicted.insert(id)
+                case .save:
+                    let styled = values["styled"].flatMap { try? RichText(encoded: $0) }.map { RichText.numbered($0.styledRuns) }
+                    await upload(current, title: values["title"] ?? current.title, body: values["body"] ?? current.body, styled: styled)
+                }
+            } catch { break }
+        }
+        updatePending()
+        if online, !pending.subtracting(conflicted).isEmpty {
+            retryTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 120_000_000_000)
+                if !Task.isCancelled { await self?.syncPending() }
+            }
+        }
+    }
+    /// `pending` from the drafts on disk: notes in the library with unsaved work.
+    func updatePending() {
+        let ids = Set(LocalStore.unsavedDrafts().map(\.id))
+        pending = Set(notes.filter { ids.contains($0.id) && !$0.trashed }.map(\.id))
+        conflicted.formIntersection(pending)
+    }
+    /// One line on notes waiting to sync, or nil when every note is saved.
+    var syncSummary: String? {
+        let waiting = pending.subtracting(conflicted).count, conflicts = conflicted.count
+        var parts: [String] = []
+        if waiting > 0 { parts.append(waiting == 1 ? "1 note waiting to sync" : "\(waiting) notes waiting to sync") }
+        if conflicts > 0 { parts.append(conflicts == 1 ? "1 note changed on another device" : "\(conflicts) notes changed on another device") }
+        return parts.isEmpty ? nil : (online ? "" : "Offline · ") + parts.joined(separator: " · ")
+    }
+    /// Settles note `id`, changed both here and on another device, as Samsung Notes does (see `ConflictChoice`). "Keep
+    /// both" saves this Mac's version as a new note "Title (Mac)" in the same folder, formatting included.
+    func resolveConflict(_ id: String, _ choice: ConflictChoice) async {
+        guard let client else { return }
+        status = "Settling the note…"
+        // Wait for a refresh or sync already under way rather than dropping the choice.
+        for _ in 0..<150 where busy || syncing { try? await Task.sleep(nanoseconds: 200_000_000) }
+        guard !busy else { status = "Still busy; choose the version again in a moment."; return }
+        guard let values = LocalStore.draft(id: id), values["saved"] != "true" else {
+            status = "This note has no unsaved version on this Mac any more."; conflicted.remove(id); draftConflict = false; return
+        }
+        busy = true
+        do {
+            let current = try await client.download(id)
+            loaded[id] = current
+            let title = values["title"] ?? current.title, body = values["body"] ?? current.body
+            let styled = values["styled"].flatMap { try? RichText(encoded: $0) }.map { RichText.numbered($0.styledRuns) }
+            switch choice {
+            case .keepThisMac:
+                busy = false
+                if selection == id { document = current; draftConflict = false }
+                guard await uploadOnce(current, title: title, body: body, styled: styled) != nil else { return }
+                status = "Kept this Mac's version. The other version is in Local copies → Backups."
+            case .keepOther:
+                try LocalStore.archiveDraft(id: id)
+                try LocalStore.writeDraft(id: id, title: current.title, body: current.body, commit: current.commit, styled: current.bodyObject?.value("text"), saved: true)
+                busy = false
+                status = "Kept the other version. This Mac's version is in Local copies → DraftHistory."
+            case .keepBoth:
+                let folder = notes.first { $0.id == id }.map { $0.folder.isEmpty || $0.folder.contains(":///") ? "root" : $0.folder } ?? "root"
+                let template = try LocalStore.noteTemplate(choosingFrom: notes.compactMap { loaded[$0.id] ?? cache?.document($0) })
+                var copy = try await client.createNote(title: (title.isEmpty ? "Untitled" : title) + " (Mac)", body: body, in: folder, template: template)
+                if let styled, copy.body == body { copy = try await client.save(copy, title: copy.title, body: body, styled: styled) }
+                try LocalStore.archiveDraft(id: id)
+                try LocalStore.writeDraft(id: id, title: current.title, body: current.body, commit: current.commit, styled: current.bodyObject?.value("text"), saved: true)
+                busy = false
+                status = "Kept both: this Mac's version is now \"\(copy.title)\"."
+            }
+            conflicted.remove(id)
+            await refresh()
+            updatePending()
+            if selection == id { await open(id) }
+        } catch { busy = false; self.error = error.localizedDescription; status = "The note was not settled." }
     }
     func signIn(useAnotherAccount: Bool = false) async {
         guard !busy else { return }
@@ -109,6 +228,7 @@ import Combine
             document = nil; selection = nil; notes = []; folders = []
             title = ""; body = ""; styledBody = nil; account = ""; folder = "all"; search = ""
             draftConflict = false; downloadedNotes = 0
+            pending = []; conflicted = []; retryTask?.cancel(); retryTask = nil
             pendingConnection = nil; importCode = ""; error = nil
             status = "Signed out. Sign in with Samsung to load your notes."
         } catch { self.error = "Could not log out: " + error.localizedDescription }
@@ -137,6 +257,7 @@ import Combine
             if let doc = cache?.document(record) { loaded[record.id] = doc }
         }
         if autoSelectFirst { selection = visibleNotes.first?.id }
+        updatePending()
         status = "Cached notes · Last synced " + snapshot.updated.formatted(date: .abbreviated, time: .shortened)
     }
     func refresh() async {
@@ -327,7 +448,8 @@ import Combine
                     title = draftTitle; body = draftBody
                     styledBody = values["styled"].flatMap { try? RichText(encoded: $0) }.map { RichText.numbered($0.styledRuns) }
                     draftConflict = values["commit"] != doc.commit
-                    status = draftConflict ? "Draft is based on an older revision. Reload to archive it and use the cloud copy." : "Recovered unsaved changes; saving them to Samsung Cloud."
+                    if draftConflict { conflicted.insert(id) }
+                    status = draftConflict ? "This note changed on another device too. Choose which version to keep." : "Recovered unsaved changes; saving them to Samsung Cloud."
                 }
             }
         } catch {
@@ -337,7 +459,7 @@ import Combine
     }
     func preserveDraft() {
         guard let document, dirty, !draftConflict else { return }
-        do { try LocalStore.writeDraft(id: document.serverID, title: title, body: body, commit: document.commit, styled: styledDraft) }
+        do { try LocalStore.writeDraft(id: document.serverID, title: title, body: body, commit: document.commit, styled: styledDraft); pending.insert(document.serverID) }
         catch { self.error = "Could not save your local draft: " + error.localizedDescription }
     }
     func scheduleDraft() {
@@ -417,6 +539,7 @@ import Combine
                 // A copy of what was saved, marked so: once another device saves a newer revision it is not unsaved work.
                 try LocalStore.writeDraft(id: id, title: savedTitle, body: savedBody, commit: fresh.commit, styled: fresh.bodyObject?.value("text"), saved: true)
                 if selection == id { self.document = fresh }
+                pending.remove(id); conflicted.remove(id)
             }
             if let i = notes.firstIndex(where: { $0.id == id }) { describe(i, document: fresh) }
             try cache?.saveIndex(CloudIndex(notes: notes, folders: folders))
@@ -428,6 +551,7 @@ import Combine
             LocalStore.logSaveFailure(id: id, reason: error.localizedDescription)
             if error.localizedDescription == CloudClient.changedElsewhere {
                 if selection == id { draftConflict = true }
+                conflicted.insert(id)
                 status = "Not saved: \(savedTitle.isEmpty ? "this note" : savedTitle) changed on another device. Your text is kept as a local draft."
             } else {
                 saveError = error.localizedDescription

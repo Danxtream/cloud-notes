@@ -72,6 +72,8 @@ struct NotesView: View {
     @State var renamingFolder: FolderRecord?
     @State var folderNewName = ""
     @State var deletingFolder: FolderRecord?
+    /// Shows the Note conflict sheet for the open note.
+    @State var choosingVersion = false
     @State var creatingNote = false
     @State var newNoteTitle = ""
     @State var pendingDelete: String?
@@ -99,6 +101,7 @@ struct NotesView: View {
             }
         }
         .toolbar { windowToolbar }
+        .sheet(isPresented: $choosingVersion) { conflictSheet }
         .alert("New note", isPresented: $creatingNote) {
             TextField("Title", text: $newNoteTitle)
             Button("Create") { let title = newNoteTitle; Task { await model.createNote(title: title) } }
@@ -112,6 +115,10 @@ struct NotesView: View {
             if model.busy || model.savesInFlight > 0 { ProgressView().controlSize(.small).frame(width: 14, height: 14) }
             Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 0)
+            if let summary = model.syncSummary {
+                Label(summary, systemImage: model.conflicted.isEmpty ? "arrow.triangle.2.circlepath" : "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(model.conflicted.isEmpty ? Color.secondary : Color.orange).lineLimit(1)
+            }
         }.padding(.horizontal, 12).frame(height: 32).background(.bar)
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .json], allowsMultipleSelection: false) { result in
@@ -166,7 +173,7 @@ struct NotesView: View {
             }.disabled(open == nil || open?.trashed == true || model.busy)
         }
         ToolbarItem {
-            Button { Task { await model.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(model.busy || model.account.isEmpty)
+            Button { Task { await model.refreshAndSync() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }.disabled(model.busy || model.account.isEmpty)
         }
         ToolbarItem { sortMenu }
         ToolbarItem {
@@ -248,6 +255,43 @@ struct NotesView: View {
         }
         .navigationSplitViewColumnWidth(min: 160, ideal: 200)
     }
+    /// Samsung Notes' Note conflict choice for the open note: this Mac's version and the other device's side by side,
+    /// then keep this Mac's, keep the other, or keep both.
+    @ViewBuilder var conflictSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Note conflict").font(.title2)
+            Text("Another device saved a different version of this note while this Mac had changes of its own. Choose which version to keep.")
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 12) {
+                conflictVersion("This Mac", title: model.title, body: model.body)
+                conflictVersion("Other device", title: model.document?.title ?? "", body: model.document?.body ?? "")
+            }
+            HStack {
+                Button("Cancel", role: .cancel) { choosingVersion = false }
+                Spacer()
+                Button("Keep Both") { resolve(.keepBoth) }.help("Keep the other version here and save this Mac's as a new note")
+                Button("Keep Other Version") { resolve(.keepOther) }
+                Button("Keep This Mac's Version") { resolve(.keepThisMac) }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20).frame(width: 640, height: 460)
+    }
+    private func conflictVersion(_ heading: String, title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(heading).font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title.isEmpty ? "Untitled" : title).fontWeight(.semibold)
+                    Text(body).textSelection(.enabled)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+        }
+    }
+    private func resolve(_ choice: ConflictChoice) {
+        choosingVersion = false
+        if let id = model.document?.serverID { Task { await model.resolveConflict(id, choice) } }
+    }
     /// The note list's Sort menu, with the orders Samsung Notes offers; the choice is kept on this Mac for every folder.
     var sortMenu: some View {
         Menu {
@@ -311,7 +355,12 @@ struct NotesView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack { Text(note.locked ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
                     if note.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Favorite") }
-                    if note.locked || note.encrypted { Image(systemName: "lock") } }
+                    if note.locked || note.encrypted { Image(systemName: "lock") }
+                    if model.conflicted.contains(note.id) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).help("Changed on this Mac and on another device: open it to choose a version")
+                    } else if model.pending.contains(note.id) {
+                        Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.secondary).help("Waiting to sync")
+                    } }
                 Text(note.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 if let days = note.daysLeftInTrash() {
                     Text(days == 1 ? "Deleted in 1 day" : "Deleted in \(days) days").font(.caption2).foregroundStyle(.secondary)
@@ -434,10 +483,10 @@ struct NotesView: View {
                 if let issue = document.textIssue { Text(issue).font(.caption).foregroundStyle(.secondary).padding(10) }
                 if model.draftConflict {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("This local draft is based on an older cloud revision. Reload the note to archive the draft and open the current cloud copy.")
+                        Text("This note changed on this Mac and on another device. Choose which version to keep.")
                             .font(.caption).foregroundStyle(.orange)
                         Spacer(minLength: 8)
-                        Button("Reload Note") { Task { await model.open(document.serverID, force: true) } }.controlSize(.small).disabled(model.busy)
+                        Button("Choose Version…") { choosingVersion = true }.controlSize(.small).disabled(model.busy)
                     }.padding(10)
                 }
                 Divider()

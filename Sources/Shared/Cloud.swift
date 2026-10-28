@@ -870,6 +870,22 @@ enum LocalStore {
         let data = try JSONSerialization.data(withJSONObject: values)
         try LocalSeal.write(data, to: try directory("Drafts").appendingPathComponent(id + ".json"), sealed: BlockedNotes.contains(id))
     }
+    /// Note `id`'s local draft (title, body, commit, and styled/saved when present), or nil.
+    static func draft(id: String) -> [String: String]? {
+        guard let url = try? directory("Drafts").appendingPathComponent(id + ".json"), let data = LocalSeal.read(url) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: String]
+    }
+    /// Every draft that holds unsaved work (not marked saved), oldest first.
+    static func unsavedDrafts() -> [(id: String, values: [String: String])] {
+        guard let folder = try? directory("Drafts"),
+              let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
+        func modified(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast }
+        return files.filter { $0.pathExtension == "json" }.sorted { modified($0) < modified($1) }.compactMap { url in
+            let id = url.deletingPathExtension().lastPathComponent
+            guard let values = draft(id: id), values["saved"] != "true", values["title"] != nil, values["body"] != nil else { return nil }
+            return (id, values)
+        }
+    }
     static func archiveDraft(id: String) throws {
         let source = try directory("Drafts").appendingPathComponent(id + ".json")
         guard FileManager.default.fileExists(atPath: source.path) else { return }
