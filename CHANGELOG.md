@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0 — 2026-10-28
+
+Cloud Notes for Samsung Notes: this version continues Samsung Cloud Notes 1.1 by Clascheurduturfu under a new name and license. Source only; there are no downloads.
+
+- **Name and license:** renamed Cloud Notes for Samsung Notes; Danxtream's changes are GPL-3.0-only, with the original project's MIT notice kept in NOTICE.md. The About window shows the license and credit.
+- **Mac app:** create notes and nested folders; folder colours and a folder menu (new subfolder, rename, colour, delete); Trash with restore and delete for good; Favorites; sorting by date modified, date created or name; formatting (bold, italic, underline, strikethrough, colours, highlight, five sizes, lists, checklists) that Samsung Notes on a phone reads back; autosave; offline edits saved when the connection returns, with Samsung's keep-this, keep-other or keep-both choice on conflicts; blocking notes from Claude, with their local copies encrypted.
+- **Saves reach phones:** saved notes stay readable by Samsung Notes and carry the sync time, so phones download the change.
+- **`scnotes`:** `new`, `favorite`, `trash`, `restore`, `delete`, `mkdir`, `folder-color`, `rename-folder`, `trash-folder`, `list --sort`, and `show --markdown` / `edit --markdown` for formatting.
+- **Removed:** the Windows connection helper and the Import Windows connection option.
+- The iPhone/iPad and Android apps come from 1.1 and have not been updated or tested with these changes. As with earlier version changes, the Mac app re-registers as 2.0.0 at its next token renewal, keeping its installation and cache identity.
+
 ## 1.1.0 — 2026-10-21
 
 Stable 1.1, published as Git tag **v1.1**, with downloads for all three platforms.

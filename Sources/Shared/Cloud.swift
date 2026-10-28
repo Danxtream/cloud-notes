@@ -7,7 +7,7 @@ import FoundationXML
 import CryptoKit
 import Security
 
-let appVersion = "1.1.0"
+let appVersion = "2.0.0"
 let appShortVersion = appVersion.components(separatedBy: "-")[0]
 /// The name people see: Finder, the Dock, the menu bar, window titles and scnotes. The bundle ID, executable,
 /// data folder and Keychain helper keep the original project's names so sign-in and local data carry over.
