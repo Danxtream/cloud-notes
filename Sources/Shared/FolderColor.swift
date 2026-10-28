@@ -1,3 +1,5 @@
+// Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
+
 import Foundation
 
 /// The folder colours Samsung Notes offers, in its colour picker's order. A folder's `color` in the cloud tree holds the

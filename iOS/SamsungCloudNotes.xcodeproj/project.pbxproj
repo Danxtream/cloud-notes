@@ -120,6 +120,7 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/../LICENSE",
+				"$(SRCROOT)/../NOTICE.md",
 				"$(SRCROOT)/../docs/THIRD_PARTY_NOTICES.md",
 				"$(SRCROOT)/../docs/third-party/samsung-re-health-LICENSE.txt",
 			);
@@ -128,12 +129,13 @@
 			);
 			outputPaths = (
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Notices/LICENSE",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Notices/NOTICE.md",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Notices/THIRD_PARTY_NOTICES.md",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Notices/samsung-re-health-LICENSE.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nmkdir -p \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Notices\"\ncp \"$SRCROOT/../LICENSE\" \"$SRCROOT/../docs/THIRD_PARTY_NOTICES.md\" \"$SRCROOT/../docs/third-party/samsung-re-health-LICENSE.txt\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Notices/\"\n";
+			shellScript = "set -e\nmkdir -p \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Notices\"\ncp \"$SRCROOT/../LICENSE\" \"$SRCROOT/../NOTICE.md\" \"$SRCROOT/../docs/THIRD_PARTY_NOTICES.md\" \"$SRCROOT/../docs/third-party/samsung-re-health-LICENSE.txt\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Notices/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

@@ -59,7 +59,7 @@ abstract class CopyNotices : DefaultTask() {
     }
 }
 val copyNotices = tasks.register<CopyNotices>("copyNotices") {
-    notices.from(rootDir.resolve("../LICENSE"), rootDir.resolve("../docs/THIRD_PARTY_NOTICES.md"), rootDir.resolve("../docs/third-party/samsung-re-health-LICENSE.txt"))
+    notices.from(rootDir.resolve("../LICENSE"), rootDir.resolve("../NOTICE.md"), rootDir.resolve("../docs/THIRD_PARTY_NOTICES.md"), rootDir.resolve("../docs/third-party/samsung-re-health-LICENSE.txt"))
 }
 androidComponents {
     onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(copyNotices, CopyNotices::output) }

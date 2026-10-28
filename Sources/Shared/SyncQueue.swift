@@ -1,3 +1,5 @@
+// Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
+
 import Foundation
 
 /// What to do with an unsaved local draft once Samsung Cloud can be reached, judged against the note's newest cloud

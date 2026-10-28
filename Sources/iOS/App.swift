@@ -1,3 +1,5 @@
+// Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
+
 import SwiftUI
 import UIKit
 import QuickLook

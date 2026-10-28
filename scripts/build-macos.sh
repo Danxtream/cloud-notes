@@ -27,6 +27,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSHumanReadableCopyright</key><string>© 2026 Danxtream. Based on Samsung Cloud Notes by Clascheurduturfu.
+Unofficial client, not affiliated with Samsung.
+Free software under the GNU GPL version 3: you may share and change it under that licence. It comes with no warranty. Licence: https://www.gnu.org/licenses/gpl-3.0.html</string>
 </dict></plist>
 PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION%%-*}" "$APP/Contents/Info.plist"
@@ -36,6 +39,7 @@ xcrun swift scripts/make-icon.swift dist/build/AppIcon.iconset
 iconutil -c icns dist/build/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 mkdir -p "$APP/Contents/Resources/Notices"
 cp LICENSE "$APP/Contents/Resources/Notices/"
+cp NOTICE.md "$APP/Contents/Resources/Notices/"
 cp docs/THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/Notices/"
 cp docs/third-party/samsung-re-health-LICENSE.txt "$APP/Contents/Resources/Notices/"
 bash scripts/sign-macos.sh "$APP"

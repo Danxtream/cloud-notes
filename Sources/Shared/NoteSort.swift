@@ -1,3 +1,5 @@
+// Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
+
 import Foundation
 
 /// How a note list is ordered, as Samsung Notes offers it: by date modified, date created or name, either way round,

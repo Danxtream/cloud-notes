@@ -1,3 +1,5 @@
+// Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
+
 import Foundation
 
 /// Samsung Notes' styled text: the decoded `<text>` of a title or body object, Base64 UTF-8 runs between `<?a …?>`
