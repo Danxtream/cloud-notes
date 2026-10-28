@@ -1,7 +1,8 @@
 #!/bin/bash
+# Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP="dist/Samsung Cloud Notes.app"
+APP="dist/Cloud Notes for Samsung Notes.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 mkdir -p dist/build
 if [ ! -s "$HOME/Library/Application Support/SamsungCloudNotes/SigningIdentity.txt" ] && [ -z "${SIGNING_IDENTITY:-}" ]; then bash scripts/setup-local-signing.sh; fi
@@ -20,7 +21,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>SamsungCloudNotes</string>
 <key>CFBundleIdentifier</key><string>local.samsung-cloud-notes</string>
-<key>CFBundleName</key><string>Samsung Cloud Notes</string>
+<key>CFBundleName</key><string>Cloud Notes for Samsung Notes</string>
+<key>CFBundleDisplayName</key><string>Cloud Notes for Samsung Notes</string>
 <key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
 <key>CFBundleVersion</key><string>VERSION_PLACEHOLDER</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>

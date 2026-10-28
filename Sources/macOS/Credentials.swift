@@ -1,3 +1,5 @@
+// Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
+
 import Foundation
 import Security
 import CryptoKit
@@ -20,7 +22,7 @@ enum CredentialVault {
     struct Reply: Decodable { var status: Int32; var data: Data? }
     static var helper: URL? { Bundle.main.resourceURL?.appendingPathComponent("CredentialStore.app/Contents/MacOS/CredentialStore") }
     static func perform(_ operation: String, service: String, data: Data? = nil) throws -> Data? {
-        guard let helper, FileManager.default.isExecutableFile(atPath: helper.path) else { throw NotesError.message("The app's Keychain helper is missing. Reinstall Samsung Cloud Notes.") }
+        guard let helper, FileManager.default.isExecutableFile(atPath: helper.path) else { throw NotesError.message("The app's Keychain helper is missing. Reinstall \(appName).") }
         var own: SecCode?; var ownStatic: SecStaticCode?; var info: CFDictionary?; var target: SecStaticCode?; var requirement: SecRequirement?
         guard SecCodeCopySelf([], &own) == errSecSuccess, let own,
               SecCodeCopyStaticCode(own, [], &ownStatic) == errSecSuccess, let ownStatic,

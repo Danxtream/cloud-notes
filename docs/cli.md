@@ -12,11 +12,11 @@ The command line runs inside the signed app executable (`SamsungCloudNotes --cli
 
 ## Install
 
-In the app: **Samsung Cloud Notes → Install Command Line Tool…**. Or from a terminal:
+In the app: **Cloud Notes for Samsung Notes → Install Command Line Tool…**. Or from a terminal:
 
 ```sh
-"/Applications/Samsung Cloud Notes.app/Contents/MacOS/SamsungCloudNotes" --cli install            # ~/.local/bin/scnotes
-"/Applications/Samsung Cloud Notes.app/Contents/MacOS/SamsungCloudNotes" --cli install /usr/local/bin
+"/Applications/Cloud Notes for Samsung Notes.app/Contents/MacOS/SamsungCloudNotes" --cli install            # ~/.local/bin/scnotes
+"/Applications/Cloud Notes for Samsung Notes.app/Contents/MacOS/SamsungCloudNotes" --cli install /usr/local/bin
 ```
 
 If the directory is not on your `PATH`, the installer prints the line to add to `~/.zshrc`. Reinstall after moving the app.

@@ -122,7 +122,7 @@ struct NotesRootView: View {
         }
         .sheet(item: $shared) { file in ShareSheet(items: [file.url]) }
         .quickLookPreview($preview)
-        .alert("Samsung Cloud Notes", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
+        .alert(appName, isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
         .confirmationDialog("Log out of \(model.account)?", isPresented: $confirmLogout, titleVisibility: .visible) {
             Button("Log out", role: .destructive) { model.signOut() }
         } message: { Text("The saved connection is removed. Cached notes and drafts stay on this device.") }

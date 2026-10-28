@@ -13,7 +13,7 @@ import FoundationXML
 enum CommandLineTool {
     static let wrapperName = "scnotes"
     static let usage = """
-    Samsung Cloud Notes \(appVersion) command line
+    \(appName) \(appVersion) command line
 
     Usage: scnotes <command> [options]
 
@@ -161,9 +161,9 @@ enum CommandLineTool {
         case "drawing": try arguments(2, "NOTE OUTPUT.pdf"); try await drawing(options.positional[0], to: options.positional[1], options)
         case "login":
             try arguments(0, "")
-            guard let app = appBundle else { throw Failure(message: "Run scnotes from an installed Samsung Cloud Notes.app.") }
+            guard let app = appBundle else { throw Failure(message: "Run scnotes from an installed \(appName).app.") }
             NSWorkspace.shared.open(app)
-            print("Opened Samsung Cloud Notes. Choose Sign in with Samsung there, then rerun scnotes.")
+            print("Opened \(appName). Choose Sign in with Samsung there, then rerun scnotes.")
         case "logout":
             try arguments(0, "")
             try SamsungSignIn.shared.signOut()
@@ -254,7 +254,7 @@ enum CommandLineTool {
             }
             let notes = index.notes.filter { !blocked.contains($0.id) }
             if !notes.contains(where: matches), index.notes.contains(where: { blocked.contains($0.id) && matches($0) }) {
-                throw Failure(message: "That note is blocked from Claude. Open it in the Samsung Cloud Notes app, or unblock it in the app's Settings.")
+                throw Failure(message: "That note is blocked from Claude. Open it in the \(appName) app, or unblock it in the app's Settings.")
             }
             if let exact = notes.first(where: { $0.id == query }) { return exact }
             let byPrefix = query.count >= 4 ? notes.filter { $0.id.hasPrefix(query) } : []
@@ -292,7 +292,7 @@ enum CommandLineTool {
         } catch CredentialError.status(errSecItemNotFound) { info["account"] = NSNull() }
         info["dataDirectory"] = LocalStore.root.path
         if options.json { try printJSON(info); return }
-        print("Samsung Cloud Notes \(appVersion)")
+        print("\(appName) \(appVersion)")
         print("Account:   \((info["account"] as? String) ?? "not signed in (run scnotes login)")")
         if let connection = info["connection"] { print("Connection: \(connection)") }
         if let count = info["cachedNotes"], let sync = info["lastSync"] { print("Cache:     \(count) notes, last synced \(sync)") }
@@ -398,7 +398,7 @@ enum CommandLineTool {
         let inside = Set([folder.id] + library.index.folders.descendants(of: folder.id))
         let notes = library.index.notes.filter { !$0.trashed && inside.contains($0.folder) }
         if notes.contains(where: { BlockedNotes.contains($0.id) }) {
-            throw Failure(message: "This folder holds a note blocked from Claude. Delete the folder in the Samsung Cloud Notes app instead.")
+            throw Failure(message: "This folder holds a note blocked from Claude. Delete the folder in the \(appName) app instead.")
         }
         try await library.client.trashFolder(folder.id, locked: Set(library.index.notes.filter { $0.locked || $0.encrypted }.map(\.resourceID)))
         print("Moved \(library.index.folders.path(of: folder.id)) and \(notes.count == 1 ? "its note" : "\(notes.count) notes") to the Trash. Samsung Notes deletes them for good after 30 days.")
@@ -565,14 +565,14 @@ enum CommandLineTool {
     }
     static func install(into directory: String?) throws -> String {
         guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath(), appBundle != nil else {
-            throw Failure(message: "Run install from the app executable inside Samsung Cloud Notes.app.")
+            throw Failure(message: "Run install from the app executable inside \(appName).app.")
         }
         let folder = directory.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let target = folder.appendingPathComponent(wrapperName)
         let quoted = "'" + executable.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let script = "#!/bin/sh\n# Samsung Cloud Notes command line wrapper. Reinstall it if the app moves.\nexec \(quoted) --cli \"$@\"\n"
+        let script = "#!/bin/sh\n# \(appName) command line wrapper. Reinstall it if the app moves.\nexec \(quoted) --cli \"$@\"\n"
         try Data(script.utf8).write(to: target, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
         let path = ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map(String.init) ?? []

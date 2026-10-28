@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Assets/AppIcon.png" width="112" height="112" alt="Samsung Cloud Notes app icon">
+  <img src="Assets/AppIcon.png" width="112" height="112" alt="Cloud Notes for Samsung Notes app icon">
 </p>
 
-<h1 align="center">Samsung Cloud Notes</h1>
+<h1 align="center">Cloud Notes for Samsung Notes</h1>
 
 <p align="center">
   An unofficial Mac app for the notes in your Samsung account.<br>
@@ -27,11 +27,11 @@
 
 ## Overview
 
-Samsung Cloud Notes lets you use the notes in your Samsung account on a Mac. You sign in on Samsung's own sign-in page, and the app works with the same notes, folders and formatting as Samsung Notes on your phone or tablet, so changes made on the Mac appear there after it syncs.
+Cloud Notes for Samsung Notes lets you use the notes in your Samsung account on a Mac. You sign in on Samsung's own sign-in page, and the app works with the same notes, folders and formatting as Samsung Notes on your phone or tablet, so changes made on the Mac appear there after it syncs.
 
-This version continues [Samsung Cloud Notes 1.1](https://github.com/Clascheurduturfu/samsung-cloud-notes) by Clascheurduturfu with a reworked Mac app. It is an experimental build: it has been used with one Samsung account and Samsung Notes 4.4.48 on one phone, and offline self-tests cover the note format, folder changes and sync decisions. Keep a separate backup of notes you can't afford to lose.
+It continues [Samsung Cloud Notes 1.1](https://github.com/Clascheurduturfu/samsung-cloud-notes) by Clascheurduturfu under a new name, with a reworked Mac app. It is an experimental build: it has been used with one Samsung account and Samsung Notes 4.4.48 on one phone, and offline self-tests cover the note format, folder changes and sync decisions. Keep a separate backup of notes you can't afford to lose.
 
-Samsung Cloud Notes is an independent project. It is not affiliated with, endorsed by or supported by Samsung.
+Cloud Notes for Samsung Notes is an independent project. It is not affiliated with, endorsed by or supported by Samsung.
 
 ## Features
 
@@ -77,18 +77,18 @@ There are no downloads for this version; build it from source. Releases on the o
 2. Get the source and build the app:
 
    ```sh
-   git clone https://github.com/Danxtream/samsung-cloud-notes.git
-   cd samsung-cloud-notes
+   git clone https://github.com/Danxtream/cloud-notes.git
+   cd cloud-notes
    bash scripts/build-macos.sh
    ```
 
-   The script builds `dist/Samsung Cloud Notes.app` for both architectures, signs it and runs the offline self-tests. `BUILD_UNIVERSAL=0` builds for Apple Silicon only.
+   The script builds `dist/Cloud Notes for Samsung Notes.app` for both architectures, signs it and runs the offline self-tests. `BUILD_UNIVERSAL=0` builds for Apple Silicon only.
 
 3. Quit any running copy, move the new app to Applications and open it.
 
 Run the first build in a normal desktop session with your login Keychain unlocked. It creates a local code-signing identity there; keep it, because the app and its Keychain helper must be signed by the same identity to reach your saved sign-in, and later builds reuse it. The app is signed only on your Mac, not by a registered Apple developer, and is not notarized.
 
-If the original project's app is in Applications, move it elsewhere before your first build, or the build reuses its differently signed helper. Expect a Keychain prompt and a new sign-in, and keep the old app until the new one works. [Signing migration](docs/building.md#signing-migration) has the details.
+If the original project's app (Samsung Cloud Notes) is in Applications, move it elsewhere before your first build, or the build reuses its differently signed helper. Expect a Keychain prompt and a new sign-in, and keep the old app until the new one works. [Signing migration](docs/building.md#signing-migration) has the details.
 
 If the build fails because your Swift compiler doesn't support the newest macOS SDK, point `SDKROOT` at one it does, for example:
 
@@ -98,7 +98,7 @@ SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash scripts/bui
 
 ## Usage
 
-1. Open **Samsung Cloud Notes** and choose **Sign in with Samsung…**. Sign-in and verification happen on Samsung's page in your browser; the app never sees your password.
+1. Open **Cloud Notes for Samsung Notes** and choose **Sign in with Samsung…**. Sign-in and verification happen on Samsung's page in your browser; the app never sees your password.
 2. Choose a folder in the sidebar and click a note to read it. Double-click a note, or press Return, to open it in the whole window.
 3. Type to edit. Changes are saved to your Samsung account automatically, and the status bar shows when everything is saved or how many notes are waiting.
 
@@ -108,7 +108,7 @@ To sign out, click your email address at the bottom of the sidebar and choose **
 
 ## Command line
 
-`scnotes` works with the same notes from Terminal and scripts. Choose **Samsung Cloud Notes → Install Command Line Tool…** to install it in `~/.local/bin` (add that folder to your `PATH` if it isn't there). It uses the app's sign-in and cache:
+`scnotes` works with the same notes from Terminal and scripts. Choose **Cloud Notes for Samsung Notes → Install Command Line Tool…** to install it in `~/.local/bin` (add that folder to your `PATH` if it isn't there). It uses the app's sign-in and cache:
 
 ```sh
 scnotes list --limit 10 --sort modified
@@ -138,7 +138,7 @@ The app connects only to Samsung's account and cloud servers. It has no telemetr
 
 Notes, attachments, drafts and backups are stored as ordinary files in `~/Library/Application Support/SamsungCloudNotes/`; treat that folder as private, and use FileVault to encrypt your disk. Blocked notes are the exception: their local copies are encrypted with a key kept in your Keychain. Output from `scnotes` contains note content.
 
-Samsung Cloud Notes has not received an independent security audit. [Authentication](docs/authentication.md) describes the sign-in and storage in more detail.
+Cloud Notes for Samsung Notes has not received an independent security audit. [Authentication](docs/authentication.md) describes the sign-in and storage in more detail.
 
 ## Development
 
@@ -158,7 +158,7 @@ This is a personal project developed with AI assistance and shared for others wh
 
 ## License
 
-Samsung Cloud Notes is free software under the [GNU General Public License version 3](LICENSE) (GPL-3.0-only). You may use, share and change it. If you share it, changed or not, you must make its source available under the same license and keep its notices, including the author credit in the About window; [NOTICE.md](NOTICE.md) has the exact term.
+Cloud Notes for Samsung Notes is free software under the [GNU General Public License version 3](LICENSE) (GPL-3.0-only). You may use, share and change it. If you share it, changed or not, you must make its source available under the same license and keep its notices, including the author credit in the About window; [NOTICE.md](NOTICE.md) has the exact term.
 
 It is based on [Samsung Cloud Notes](https://github.com/Clascheurduturfu/samsung-cloud-notes) by Clascheurduturfu, whose code was published under the MIT license. That license and its copyright notice are kept in [NOTICE.md](NOTICE.md) and still apply to the original code. The app icon is the original project's own artwork.
 
@@ -168,8 +168,8 @@ Adapted code and other components keep their own licenses; see the [third-party 
 - [sdocx](https://github.com/twangodev/sdocx) by twangodev: its published format research helped read handwriting data. No sdocx code is included.
 - [Inkport](https://github.com/Mhemd139/Samsung_Notes) by Mhemd139 was a reference for viewing Samsung Notes files. No Inkport code is included.
 
-Samsung, Samsung Notes and Samsung Cloud are trademarks of Samsung Electronics Co., Ltd., used here only to say what the app works with. Samsung Cloud Notes is independently developed and is not affiliated with, endorsed by or supported by Samsung. It contains no Samsung software, code or artwork, and you need your own Samsung account to use it.
+Samsung, Samsung Notes and Samsung Cloud are trademarks of Samsung Electronics Co., Ltd., used here only to say what the app works with. Cloud Notes for Samsung Notes is independently developed and is not affiliated with, endorsed by or supported by Samsung. It contains no Samsung software, code or artwork, and you need your own Samsung account to use it.
 
 ## Donate
 
-If you find Samsung Cloud Notes useful and would like to support my work, please consider [making a donation](https://danxtream.gumroad.com/coffee).
+If you find Cloud Notes for Samsung Notes useful and would like to support my work, please consider [making a donation](https://danxtream.gumroad.com/coffee).

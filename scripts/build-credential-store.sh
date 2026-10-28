@@ -1,8 +1,12 @@
 #!/bin/bash
+# Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HELPER="$1"
-INSTALLED="/Applications/Samsung Cloud Notes.app/Contents/Resources/CredentialStore.app"
+# Reuse the installed helper so the saved sign-in keeps working; apps built before the rename are named
+# Samsung Cloud Notes.
+INSTALLED="/Applications/Cloud Notes for Samsung Notes.app/Contents/Resources/CredentialStore.app"
+[ -x "$INSTALLED/Contents/MacOS/CredentialStore" ] || INSTALLED="/Applications/Samsung Cloud Notes.app/Contents/Resources/CredentialStore.app"
 if [ -x "$HELPER/Contents/MacOS/CredentialStore" ]; then codesign --verify --strict "$HELPER"; exit 0; fi
 mkdir -p "$(dirname "$HELPER")"
 if [ -x "$INSTALLED/Contents/MacOS/CredentialStore" ]; then

@@ -91,7 +91,7 @@ struct NotesView: View {
             // On macOS a three-column split view keeps its note list with .detailOnly, so the open note replaces the
             // split view instead.
             if noteFullView {
-                detailPane.navigationTitle("Samsung Cloud Notes")
+                detailPane.navigationTitle(appName)
             } else {
                 NavigationSplitView(columnVisibility: $columns) {
                     sidebarPane
@@ -141,7 +141,7 @@ struct NotesView: View {
                 HStack { Button("Cancel") { model.pendingConnection = nil }; Spacer(); Button("Connect") { if let data = model.pendingConnection { Task { await model.importConnection(data, code: model.importCode) } } }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 440)
         }
-        .alert("Samsung Cloud Notes", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
+        .alert(appName, isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
         .onChange(of: model.selection) { value in Task { await model.select(value) } }
         .onChange(of: model.title) { _ in model.edited() }
         .onChange(of: model.body) { _ in model.edited() }
@@ -214,7 +214,7 @@ struct NotesView: View {
             }
             Label("Trash", systemImage: "trash").tag("trash")
         }
-        .navigationTitle("Samsung Cloud Notes")
+        .navigationTitle(appName)
         .alert("New folder", isPresented: $creatingFolder) {
             TextField("Name", text: $newFolderName)
             Button("Create") { let name = newFolderName, parent = newFolderParent; Task { await model.createFolder(named: name, in: parent) } }

@@ -2,13 +2,13 @@
 
 ## macOS
 
-`bash scripts/build-macos.sh` creates `dist/Samsung Cloud Notes.app`, generates its icon, includes notices, signs and runs offline self-tests. Both architectures target macOS 13; `BUILD_UNIVERSAL=0` builds Apple Silicon only.
+`bash scripts/build-macos.sh` creates `dist/Cloud Notes for Samsung Notes.app`, generates its icon, includes notices, signs and runs offline self-tests. Both architectures target macOS 13; `BUILD_UNIVERSAL=0` builds Apple Silicon only.
 
 The first build needs a graphical login session and unlocked login Keychain. Setup imports a local code-signing-only identity. Its public fingerprint is remembered under `~/Library/Application Support/SamsungCloudNotes/SigningIdentity.txt`; the private key stays in Keychain. Loose keys, temporary P12 and password files are removed. No system/TLS trust root is installed. Remote builds use LaunchServices for setup/signing and may require approval.
 
 ### Signing migration
 
-The app and credential helper must share a signing certificate. The helper is reused unchanged from an existing build or `/Applications/Samsung Cloud Notes.app`, retaining its Keychain code hash across app updates.
+The app and credential helper must share a signing certificate. The helper is reused unchanged from an existing build or the installed app (`/Applications/Cloud Notes for Samsung Notes.app`, or `/Applications/Samsung Cloud Notes.app` for builds from before the rename), retaining its Keychain code hash across app updates.
 
 `SIGNING_IDENTITY` selects an existing identity; the SSH signer expects its 40-character fingerprint. Switching identities does not migrate the installed helper. To build with a different identity, move the old installed app and previous build output aside, then build a fresh helper. Preserve the old app until new credential access is verified. Expect approval and possibly a new sign-in; never copy private signing keys into the repo or CI.
 

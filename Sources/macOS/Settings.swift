@@ -2,7 +2,7 @@
 
 import SwiftUI
 
-/// The app's Settings window (Samsung Cloud Notes → Settings…).
+/// The app's Settings window (Cloud Notes for Samsung Notes → Settings…).
 struct SettingsView: View {
     var body: some View {
         TabView {

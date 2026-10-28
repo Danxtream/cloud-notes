@@ -1,3 +1,5 @@
+// Licensed under GPL-3.0-only with an additional term under section 7(b); see LICENSE and NOTICE.md.
+
 package local.samsungcloudnotes
 
 import android.os.Build
@@ -125,7 +127,7 @@ fun NotesApp(model: NotesViewModel, openFile: (File, String) -> Unit) {
 
     model.error?.let { message ->
         AlertDialog(onDismissRequest = { model.error = null }, confirmButton = { TextButton(onClick = { model.error = null }) { Text("OK") } },
-            title = { Text("Samsung Cloud Notes") }, text = { Text(message) })
+            title = { Text("Cloud Notes for Samsung Notes") }, text = { Text(message) })
     }
     if (confirmLogout) {
         AlertDialog(onDismissRequest = { confirmLogout = false },
@@ -159,7 +161,7 @@ private fun Library(model: NotesViewModel, onLogout: () -> Unit) {
     ModalNavigationDrawer(drawerState = drawer, drawerContent = {
         ModalDrawerSheet {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
-                Text("Samsung Cloud Notes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp))
+                Text("Cloud Notes for Samsung Notes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp))
                 fun choose(id: String) { model.chooseFolder(id); scope.launch { drawer.close() } }
                 NavigationDrawerItem(label = { Text("All notes") }, selected = model.folder == "all", onClick = { choose("all") }, modifier = Modifier.padding(horizontal = 12.dp))
                 if (model.folders.isNotEmpty()) {

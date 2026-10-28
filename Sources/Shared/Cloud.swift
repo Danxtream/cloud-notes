@@ -9,6 +9,9 @@ import Security
 
 let appVersion = "1.1.0"
 let appShortVersion = appVersion.components(separatedBy: "-")[0]
+/// The name people see: Finder, the Dock, the menu bar, window titles and scnotes. The bundle ID, executable,
+/// data folder and Keychain helper keep the original project's names so sign-in and local data carry over.
+let appName = "Cloud Notes for Samsung Notes"
 var transientSession: AccountSession?
 
 enum NotesError: LocalizedError {
