@@ -15,7 +15,7 @@ As permitted by section 7(b) of the GNU General Public License version 3, the fo
 
 ## Original project
 
-This program is based on [Samsung Cloud Notes](https://github.com/Clascheurduturfu/samsung-cloud-notes) by Clascheurduturfu, up to that project's commit `41ecaed`. Its code and artwork were published under the following license, which continues to apply to them:
+This program is based on [Samsung Cloud Notes](https://github.com/Clascheurduturfu/samsung-cloud-notes) by Clascheurduturfu, up to that project's commit `41ecaed`. Its code and artwork were published under the following license, which continues to apply to them. The MIT license covers only that original code and artwork: everything Danxtream added or changed is licensed under GPL-3.0-only, and the program as a whole is distributed under GPL-3.0-only.
 
 ```text
 MIT License

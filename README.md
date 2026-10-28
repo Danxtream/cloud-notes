@@ -160,7 +160,7 @@ This is a personal project developed with AI assistance and shared for others wh
 
 Cloud Notes for Samsung Notes is free software under the [GNU General Public License version 3](LICENSE) (GPL-3.0-only). You may use, share and change it. If you share it, changed or not, you must make its source available under the same license and keep its notices, including the author credit in the About window; [NOTICE.md](NOTICE.md) has the exact term.
 
-It is based on [Samsung Cloud Notes](https://github.com/Clascheurduturfu/samsung-cloud-notes) by Clascheurduturfu, whose code was published under the MIT license. That license and its copyright notice are kept in [NOTICE.md](NOTICE.md) and still apply to the original code. The app icon is the original project's own artwork.
+It is based on [Samsung Cloud Notes](https://github.com/Clascheurduturfu/samsung-cloud-notes) by Clascheurduturfu, whose code was published under the MIT license. That license and its copyright notice are kept in [NOTICE.md](NOTICE.md) and apply only to the original code; everything added or changed in this version is GPL-3.0-only. The app icon is the original project's own artwork.
 
 Adapted code and other components keep their own licenses; see the [third-party notices](docs/THIRD_PARTY_NOTICES.md).
 
