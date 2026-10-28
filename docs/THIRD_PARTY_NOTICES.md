@@ -2,21 +2,7 @@
 
 The macOS and iOS apps use Apple's system frameworks and contain an original Swift implementation and original icon artwork. Samsung Notes and Samsung Cloud are Samsung trademarks; this project is unofficial and unaffiliated. No Samsung application, SDK or icon is bundled.
 
-The Windows connection helper packages the following existing runtime components. Their license texts are retained in `docs/third-party` and bundled under `notices` in the executable:
-
-| Component | Version used | License |
-| --- | --- | --- |
-| CPython | 3.14.3 | Python Software Foundation license and bundled notices |
-| Tcl/Tk | 8.6 | Tcl/Tk license terms |
-| Frida | 17.9.3 | wxWindows Library Licence 3.1 |
-| psutil | 7.2.2 | BSD-3-Clause |
-| pywin32 | 312 | Python license and component notices |
-| cryptography | 46.0.7 | Apache-2.0 or BSD-3-Clause, with bundled dependency notices |
-| cffi | 2.0.0 | MIT |
-| pycparser | 3.0 | BSD-3-Clause |
-| PyInstaller bootloader | 6.19.0 | GPL with the PyInstaller distribution exception |
-
-The build uses PyInstaller; its exception permits distribution of the packaged application under the application's own terms. This project is licensed under GPL-3.0-only (see the root LICENSE); the original project's code and artwork remain MIT licensed, as recorded in NOTICE.md. These third-party license terms remain in effect for their respective components.
+This project is licensed under GPL-3.0-only (see the root LICENSE); the original project's code and artwork remain MIT licensed, as recorded in NOTICE.md. These third-party license terms remain in effect for their respective components.
 
 The Android app contains an original Kotlin port of that implementation and bundles these Apache-2.0 libraries from Google's Maven repository (license: https://www.apache.org/licenses/LICENSE-2.0): AndroidX Activity, Browser, Core, Lifecycle, Jetpack Compose (UI, Foundation, Material 3, Material Icons) and Kotlin's standard library and coroutines (JetBrains, Apache-2.0). Their notices are carried in the libraries' own artifacts. The APK also contains this file, the project LICENSE and NOTICE.md and the samsung-re-health license under `assets/notices`.
 

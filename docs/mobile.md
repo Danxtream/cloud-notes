@@ -15,7 +15,6 @@ Samsung Notes is distributed for Galaxy devices; on other phones its Samsung Clo
 - **Sign-in:** Samsung's page opens in an `ASWebAuthenticationSession` sheet; iOS first asks to allow account.samsung.com.
 - **Credentials:** the app's own Keychain items, `AfterFirstUnlockThisDeviceOnly`; they are not synced through iCloud Keychain.
 - **Files:** attachments and drawing PDFs open in Quick Look. **Export original…** produces a zipped `.samsungnote` folder for the share sheet.
-- **Windows import** is available, as on the Mac.
 
 ## Android
 
@@ -26,7 +25,6 @@ Samsung Notes is distributed for Galaxy devices; on other phones its Samsung Clo
 - **Sign-in:** Samsung's page opens in a Custom Tab. The app claims the `ms-app://s-1-15-2-…` redirect that Samsung's SDK flow returns to, so the browser hands the callback straight back. If you close the tab, sign-in is cancelled.
 - **Credentials:** sealed with an AES-GCM key held in Android Keystore (non-exportable) and stored in no-backup app storage. Android backup and device transfer are disabled for all app data.
 - **Files:** attachments and drawing PDFs open in another app through a temporary content URI. **Export original…** saves a zipped `.samsungnote` folder wherever you choose.
-- **Not yet available on Android:** Windows connection import.
 
 ### Android sign-in notes
 

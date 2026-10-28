@@ -80,7 +80,6 @@ struct SharedFile: Identifiable { let url: URL; var id: URL { url } }
 struct NotesRootView: View {
     @StateObject var model = NotesModel()
     @Environment(\.scenePhase) private var scenePhase
-    @State private var importing = false
     @State private var showDrawing = false
     @State private var preview: URL?
     @State private var shared: SharedFile?
@@ -95,30 +94,6 @@ struct NotesRootView: View {
             noteList
         } detail: {
             detail
-        }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .json], allowsMultipleSelection: false) { result in
-            do {
-                guard let url = try result.get().first else { return }
-                let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                let data = try Data(contentsOf: url)
-                let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                if dictionary?["sealed"] != nil { model.pendingConnection = data }
-                else { Task { await model.importConnection(data) } }
-            } catch { model.error = error.localizedDescription }
-        }
-        .sheet(isPresented: Binding(get: { model.pendingConnection != nil }, set: { if !$0 { model.pendingConnection = nil } })) {
-            NavigationStack {
-                Form {
-                    Section(footer: Text("Paste the connection code shown by the Windows exporter. Your session will be stored in this device's Keychain.")) {
-                        SecureField("Connection code", text: $model.importCode).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    }
-                }
-                .navigationTitle("Unlock connection").navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.pendingConnection = nil } }
-                    ToolbarItem(placement: .confirmationAction) { Button("Connect") { if let data = model.pendingConnection { Task { await model.importConnection(data, code: model.importCode) } } } }
-                }
-            }
         }
         .sheet(item: $shared) { file in ShareSheet(items: [file.url]) }
         .quickLookPreview($preview)
@@ -188,7 +163,6 @@ struct NotesRootView: View {
             Text("Your Samsung notes, on \(ClientPlatform.model)").font(.title2).multilineTextAlignment(.center)
             Text("Sign in with your Samsung account to access your notes directly from Samsung Cloud.").foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Sign in with Samsung") { Task { await model.signIn() } }.buttonStyle(.borderedProminent).disabled(model.busy)
-            Button("Import Windows connection…") { importing = true }.font(.footnote).disabled(model.busy)
         }.padding(24).frame(maxWidth: 380)
     }
 

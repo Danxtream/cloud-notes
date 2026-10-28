@@ -22,7 +22,7 @@ The older `/user/v7/activate` route issued a device ID, but its `/auth/sc/tokens
 
 The app checks the cloud expiry before requests. Expired Notes service access attempts its refresh grant; rejected refresh grants fall back to authorization using the reusable Samsung account state. A rejected cloud bearer triggers one renewal and retry. Network failures retain the local cache and drafts. If Samsung revokes the reusable account authorization, the user must sign in again.
 
-Native cache directories are keyed by account and installation identity, not bearer contents. Renewing credentials therefore preserves cached documents and attachments. Native renewal does not require a Windows credential file or running Windows application.
+Native cache directories are keyed by account and installation identity, not bearer contents. Renewing credentials therefore preserves cached documents and attachments.
 
 ## Keychain identity across local builds
 
@@ -40,6 +40,6 @@ The signing identity's private key stays in the user's login Keychain. The setup
 
 ## Account menu (1.0.0-rc.1)
 
-The signed-in sidebar shows the account email as a menu with Log out. Signing out cancels renewal, removes the native authorization and saved cloud session from Keychain and clears the visible account/library. Local drafts and cache remain. The welcome screen then offers Sign in with Samsung (or the optional Windows import). This is an app logout, not a Samsung-wide browser/device sign-out or token revocation.
+The signed-in sidebar shows the account email as a menu with Log out. Signing out cancels renewal, removes the native authorization and saved cloud session from Keychain and clears the visible account/library. Local drafts and cache remain. The welcome screen then offers Sign in with Samsung. This is an app logout, not a Samsung-wide browser/device sign-out or token revocation.
 
 See [the complete research note](reverse-engineering.md) for encryption fields, analysis landmarks and rejected routes.

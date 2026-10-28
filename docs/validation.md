@@ -44,12 +44,6 @@ Development checks on Apple Silicon with Xcode 27.1 (Swift 6.4, Swift 5 mode), a
 
 Not yet exercised in this beta: cloud **saves** from the iOS app, the Android app or `scnotes edit` (they share or port the Mac's verified save path, but no write was made); export, attachments and drawing previews on mobile against real notes; physical iPhones/iPads and Android phones; iPad layout; the Mac's 1.1.0 re-registration (its saved cloud token was still valid); Android tablets/foldables; process death during Android sign-in; Intel Macs.
 
-## Windows helper 0.1.3
-
-Tested on Windows x64 with Samsung Notes 4.3.831.0. Standalone packaging includes Python/Tk and pinned dependencies/notices. Live authorized Sync now capture, detachment, read-only cloud validation, cancellation/retry and encrypted export/recovery/decrypt checks passed.
-
-Six unit tests cover export/tamper rejection, header rejection, distinct recovery paths, cancellation and rejected validation. They use synthetic credentials and do not contact Samsung.
-
 ## Reproduce offline checks
 
 macOS: `bash scripts/check-macos.sh` compiles both app architectures and host support utilities, then runs offline self-tests. iOS: `bash scripts/check-ios.sh` builds for the simulator and runs the shared self-tests in a simulator. Android: `bash scripts/check-android.sh` runs the JVM unit tests and assembles a debug APK. Windows: `python -m unittest discover -s Tests -v` after installing pinned requirements. CI uses no account credentials. Signing/Keychain setup and cloud checks require an interactive Mac and are outside CI.

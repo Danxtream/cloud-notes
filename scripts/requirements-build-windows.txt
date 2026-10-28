@@ -1,2 +1,0 @@
--r requirements-windows.txt
-pyinstaller==6.19.0

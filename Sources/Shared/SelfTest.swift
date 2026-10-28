@@ -201,11 +201,8 @@ enum SelfTest {
         guard try StyledText.decode(Data(mixed.utf8).base64EncodedString()) == "one\ntwo" else { throw NotesError.message("Styled spans mismatch.") }
         let cursor = Data(base64Encoded: CloudClient.initialCursor("NOTE"))!
         guard let initial = try JSONSerialization.jsonObject(with: cursor) as? [String: Any], initial["purpose"] as? String == "INITIAL" else { throw NotesError.message("Invalid initial cursor.") }
-        let fixtureKey = Data(base64Encoded: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")!
-        let fixtureSealed = Data(base64Encoded: "AAECAwQFBgcICQoLPCC3brGNrWnkO/b/2IYWT7n0xVGRCToOGBSc62kBZcZoc4OfwK98/RfQFoLmqk5Rli0V/z/0j/he9El2bY2BzMoegBOrpVMTeXbXPAnzebjVhAMKnKbdV6pdmQ==")!
-        let fixturePlain = try AES.GCM.open(AES.GCM.SealedBox(combined: fixtureSealed), using: SymmetricKey(data: fixtureKey))
-        let session = try JSONDecoder().decode(AccountSession.self, from: fixturePlain)
-        guard session.account == "Fixture", session.authorization == "Bearer synthetic-connection-fixture" else { throw NotesError.message("Windows connection decryption mismatch.") }
+        // A synthetic signed-in session for the cache checks below.
+        let session = AccountSession(authorization: "Bearer synthetic-connection-fixture", account: "Fixture")
         let fixtureXML = "<CompareNoteView><noteResource isLocked=\"false\" isEncrypted=\"false\" unknownField=\"retain\"><noteTree ver=\"4000\"><bodyText id=\"body\" h=\"old\" t=\"0\"/></noteTree><attributes><title><object/></title></attributes><bodyText id=\"body\"><object type=\"textBox\" hash=\"old\"><text>\(StyledText.encode("Before"))</text></object></bodyText><pageList><page id=\"page\"><opaqueDrawing value=\"preserve\"/></page></pageList><contentFileList><contentFile id=\"asset\" hash=\"original\"/></contentFileList></noteResource><commitId>fixture-revision</commitId><downloadUrls/></CompareNoteView>"
         // The portable DOM must round-trip the fixture exactly as the shared code sees it.
         let portable = try PortableXMLDocument(data: Data(fixtureXML.utf8), options: [.nodePreserveAll, .nodeLoadExternalEntitiesNever])

@@ -54,14 +54,8 @@ The command line is part of the app executable (`--cli`), so every Mac build inc
 | Signing scripts | Local identity setup and signing utilities |
 | `scripts/make-icon.swift` | Original icon generation (`--full-bleed` for the iOS icon) |
 | `scripts/check-*.sh` | Offline checks per platform, as run by CI |
-| Windows Python scripts | Optional GUI/CLI exporter |
-| `Tests/` | Synthetic Windows unit tests |
 | `docs/third-party/` | Dependency/adaptation licenses |
 
 ## Diagnostics
 
 `--self-test` is offline. Other flags in `Sources/macOS/App.swift` are tools for an explicitly authorized account: `--verify-native`, `--verify-cache`, `--verify-previews` and `--verify-cloud` read account data and may renew credentials or write caches. `--verify-signout` temporarily removes credentials and attempts restoration. `--test-save <note-id>` writes only a specially marked isolated test note; inspect its guard before use. Keep these out of unattended CI and real output out of bug reports.
-
-## Windows
-
-See [the helper guide](windows-helper.md). Use an isolated Python environment and keep build output in ignored `dist/`. Exports and DPAPI recovery data must never enter packages.

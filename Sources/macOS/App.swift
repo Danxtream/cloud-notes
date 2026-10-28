@@ -65,7 +65,6 @@ extension NotesModel {
 struct NotesView: View {
     @StateObject var model = NotesModel()
     @StateObject var formatting = RichTextController()
-    @State var importing = false
     @State var showDrawing = false
     @State var creatingFolder = false
     @State var newFolderName = ""
@@ -122,24 +121,6 @@ struct NotesView: View {
                     .font(.caption).foregroundStyle(model.conflicted.isEmpty ? Color.secondary : Color.orange).lineLimit(1)
             }
         }.padding(.horizontal, 12).frame(height: 32).background(.bar)
-        }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data, .json], allowsMultipleSelection: false) { result in
-            do {
-                guard let url = try result.get().first else { return }
-                let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                let data = try Data(contentsOf: url)
-                let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                if dictionary?["sealed"] != nil { model.pendingConnection = data }
-                else { Task { await model.importConnection(data) } }
-            } catch { model.error = error.localizedDescription }
-        }
-        .sheet(isPresented: Binding(get: { model.pendingConnection != nil }, set: { if !$0 { model.pendingConnection = nil } })) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Unlock Samsung connection").font(.title2)
-                Text("Paste the connection code shown by the Windows exporter. Your session will be stored in this Mac's Keychain.").frame(width: 390)
-                SecureField("Connection code", text: $model.importCode).textFieldStyle(.roundedBorder)
-                HStack { Button("Cancel") { model.pendingConnection = nil }; Spacer(); Button("Connect") { if let data = model.pendingConnection { Task { await model.importConnection(data, code: model.importCode) } } }.keyboardShortcut(.defaultAction) }
-            }.padding(24).frame(width: 440)
         }
         .alert(appName, isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK") { model.error = nil } } message: { Text(model.error ?? "") }
         .onChange(of: model.selection) { value in Task { await model.select(value) } }
@@ -516,7 +497,6 @@ struct NotesView: View {
                 Text(model.account.isEmpty ? "Sign in with your Samsung account to access your notes directly from this Mac." : "Notes load directly from Samsung Cloud.").foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 340)
                 if model.account.isEmpty {
                     Button("Sign in with Samsung…") { Task { await model.signIn() } }.buttonStyle(.borderedProminent).disabled(model.busy)
-                    Button("Import Windows connection…") { importing = true }.buttonStyle(.link).disabled(model.busy)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }

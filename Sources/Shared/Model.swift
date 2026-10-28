@@ -46,8 +46,6 @@ import Network
     private var unsavedSince: Date?
     @Published var account = ""
     @Published var document: CloudDocument?
-    @Published var pendingConnection: Data?
-    @Published var importCode = ""
     private var client: CloudClient?
     private var cache: NoteCache?
     private(set) var downloadedNotes = 0
@@ -231,26 +229,9 @@ import Network
             title = ""; body = ""; styledBody = nil; account = ""; folder = "all"; search = ""
             draftConflict = false; downloadedNotes = 0
             pending = []; conflicted = []; retryTask?.cancel(); retryTask = nil
-            pendingConnection = nil; importCode = ""; error = nil
+            error = nil
             status = "Signed out. Sign in with Samsung to load your notes."
         } catch { self.error = "Could not log out: " + error.localizedDescription }
-    }
-    func importConnection(_ data: Data, code: String = "") async {
-        do {
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            let sessionData: Data
-            if let sealed = json?["sealed"] as? String {
-                guard json?["format"] as? String == "samsung-cloud-notes-connection", json?["version"] as? Int == 1 else { throw NotesError.message("This connection file version is not supported.") }
-                guard let keyData = Data(base64Encoded: code.trimmingCharacters(in: .whitespacesAndNewlines)), keyData.count == 32,
-                      let combined = Data(base64Encoded: sealed) else { throw NotesError.message("Paste the 44-character connection code shown by the Windows exporter.") }
-                let box = try AES.GCM.SealedBox(combined: combined)
-                sessionData = try AES.GCM.open(box, using: SymmetricKey(data: keyData))
-            } else { sessionData = data }
-            let session = try JSONDecoder().decode(AccountSession.self, from: sessionData)
-            try SessionStore.save(session)
-            pendingConnection = nil; importCode = ""
-            await connect()
-        } catch { self.error = "Could not import the connection: " + error.localizedDescription }
     }
     func restoreCache() {
         guard let snapshot = cache?.snapshot() else { return }
