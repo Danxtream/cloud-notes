@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="222" height="26" viewBox="0 0 222 26" role="img" aria-label="macOS, Apple Silicon and Intel architectures">
+  <defs><clipPath id="edge"><rect x=".5" y=".5" width="221" height="25" rx="5"/></clipPath></defs>
+  <g clip-path="url(#edge)"><path fill="#34485a" d="M0 0h72v26H0z"/><path fill="#28333e" d="M72 0h150v26H72z"/></g>
+  <rect x=".5" y=".5" width="221" height="25" rx="5" fill="none" stroke="#465361"/>
+  <path d="M72 5v16" stroke="#56616d"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" text-anchor="middle"><text x="36" y="17.5" fill="#f0f4f8" font-size="12" font-weight="600">macOS</text><text x="147" y="17.5" fill="#b7c2cd" font-size="12">Apple Silicon · Intel</text></g>
+</svg>
