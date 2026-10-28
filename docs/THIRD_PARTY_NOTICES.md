@@ -16,7 +16,7 @@ The Windows connection helper packages the following existing runtime components
 | pycparser | 3.0 | BSD-3-Clause |
 | PyInstaller bootloader | 6.19.0 | GPL with the PyInstaller distribution exception |
 
-The build uses PyInstaller; its exception permits distribution of the packaged application under the application's own terms. Original project code and artwork are MIT licensed; see the root LICENSE. These third-party license terms remain in effect for their respective components.
+The build uses PyInstaller; its exception permits distribution of the packaged application under the application's own terms. This project is licensed under GPL-3.0-only (see the root LICENSE); the original project's code and artwork remain MIT licensed, as recorded in NOTICE.md. These third-party license terms remain in effect for their respective components.
 
 The Android app contains an original Kotlin port of that implementation and bundles these Apache-2.0 libraries from Google's Maven repository (license: https://www.apache.org/licenses/LICENSE-2.0): AndroidX Activity, Browser, Core, Lifecycle, Jetpack Compose (UI, Foundation, Material 3, Material Icons) and Kotlin's standard library and coroutines (JetBrains, Apache-2.0). Their notices are carried in the libraries' own artifacts. The APK also contains this file, the project LICENSE and the samsung-re-health license under `assets/notices`.
 

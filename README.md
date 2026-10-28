@@ -6,7 +6,7 @@
 <img src="https://img.shields.io/badge/macOS-13%2B-black?logo=apple" alt="macOS 13 or newer">
 <img src="https://img.shields.io/badge/iOS-16%2B-black?logo=apple" alt="iOS 16 or newer">
 <img src="https://img.shields.io/badge/Android-8%2B-3DDC84?logo=android&logoColor=white" alt="Android 8 or newer">
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="GPL-3.0 license"></a>
 </p>
 <p align="center"><a href="#get-started">Get started</a> · <a href="docs/cli.md">Command line</a> · <a href="docs/mobile.md">iPhone &amp; Android</a> · <a href="#build-from-source">Build</a> · <a href="docs/reverse-engineering.md">Reverse-engineering findings</a> · <a href="#credits">Credits</a></p>
 
@@ -174,4 +174,4 @@ The direct Notes XML/read/write client was established separately through Window
 
 ## License
 
-Original code and artwork are [MIT licensed](LICENSE). Adapted code and packaged runtimes retain their licenses; see [third-party notices](docs/THIRD_PARTY_NOTICES.md).
+This version is licensed under [GPL-3.0-only](LICENSE). The original project's code and artwork remain MIT licensed, as recorded in [NOTICE.md](NOTICE.md). Adapted code and packaged runtimes retain their licenses; see [third-party notices](docs/THIRD_PARTY_NOTICES.md).
