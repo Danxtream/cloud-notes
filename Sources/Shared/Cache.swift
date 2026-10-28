@@ -24,7 +24,9 @@ final class NoteCache {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     }
     private static func key(_ value: String) -> String { SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined() }
-    private func url(_ key: String, kind: String) -> URL { root.appendingPathComponent(kind + "-" + Self.key(key)) }
+    /// The file name for a cached note (`kind` "note", keyed by note id) or attachment ("asset", "id:revision").
+    static func fileName(_ key: String, kind: String) -> String { kind + "-" + Self.key(key) }
+    private func url(_ key: String, kind: String) -> URL { root.appendingPathComponent(Self.fileName(key, kind: kind)) }
     private func write(_ data: Data, to url: URL) throws {
         try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
@@ -34,12 +36,16 @@ final class NoteCache {
               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data), snapshot.version == 1 else { return nil }
         return snapshot
     }
+    /// Saves the note list; blocked notes are saved without their text preview (see `BlockedNotes`).
     func saveIndex(_ index: CloudIndex, updated: Date = Date()) throws {
+        var index = index
+        let blocked = BlockedNotes.ids()
+        for position in index.notes.indices where blocked.contains(index.notes[position].id) { index.notes[position].snippet = "" }
         try write(JSONEncoder().encode(Snapshot(updated: updated, index: index)), to: root.appendingPathComponent("index.json"))
     }
     func document(_ record: NoteRecord) -> CloudDocument? {
         guard !record.locked && !record.encrypted,
-              let data = try? Data(contentsOf: url(record.id, kind: "note")),
+              let data = LocalSeal.read(url(record.id, kind: "note")),
               let entry = try? JSONDecoder().decode(Entry.self, from: data), entry.revision == record.commit else { return nil }
         return try? CloudDocument(serverID: record.id, data: entry.xml)
     }
@@ -48,10 +54,14 @@ final class NoteCache {
         // Signed download URLs expire and may carry access parameters. Keep only
         // document data on disk; attachments already opened have their own cache.
         if let urls = xml.rootElement()?.first("downloadUrls") { urls.detach() }
-        try write(JSONEncoder().encode(Entry(revision: revision, xml: Data(xml.xmlString.utf8))), to: url(document.serverID, kind: "note"))
+        let entry = try JSONEncoder().encode(Entry(revision: revision, xml: Data(xml.xmlString.utf8)))
+        try write(BlockedNotes.contains(document.serverID) ? LocalSeal.seal(entry) : entry, to: url(document.serverID, kind: "note"))
     }
-    func asset(id: String, revision: String) -> Data? { try? Data(contentsOf: url(id + ":" + revision, kind: "asset")) }
-    func saveAsset(_ data: Data, id: String, revision: String) throws { try write(data, to: url(id + ":" + revision, kind: "asset")) }
+    func asset(id: String, revision: String) -> Data? { LocalSeal.read(url(id + ":" + revision, kind: "asset")) }
+    /// Caches an attachment; `sealed` for the attachments of a blocked note.
+    func saveAsset(_ data: Data, id: String, revision: String, sealed: Bool = false) throws {
+        try write(sealed ? LocalSeal.seal(data) : data, to: url(id + ":" + revision, kind: "asset"))
+    }
     func prune(_ records: [NoteRecord]) throws {
         let keep = Set(records.filter { !$0.locked && !$0.encrypted }.map { url($0.id, kind: "note").lastPathComponent })
         for file in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) where file.lastPathComponent.hasPrefix("note-") && !keep.contains(file.lastPathComponent) {

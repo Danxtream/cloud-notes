@@ -112,6 +112,16 @@ enum SelfTest {
               order(NoteSort(key: .name)) == ["2", "1", "3", "5", "4"], order(NoteSort(key: .name, reversed: true)) == ["4", "5", "3", "1", "2"],
               order(NoteSort(key: .created)) == ["2", "3", "4", "1", "5"], order(NoteSort(key: .name, favoritesFirst: true)) == ["2", "1", "3", "5", "4"],
               order(NoteSort(key: .modified, favoritesFirst: true)) == ["2", "1", "3", "4", "5"] else { throw NotesError.message("Note order mismatch.") }
+        // Local copies of blocked notes: sealed data starts with the marker, opens back to the original, is never sealed
+        // twice, fails to open with another key, and unsealed data passes through; the block list reads back.
+        let fixtureLocalKey = SymmetricKey(data: Data(repeating: 7, count: 32)), plainCopy = Data("<note>fixture</note>".utf8)
+        let sealedCopy = try LocalSeal.seal(plainCopy, with: fixtureLocalKey)
+        guard LocalSeal.isSealed(sealedCopy), !LocalSeal.isSealed(plainCopy), sealedCopy.range(of: plainCopy) == nil,
+              try LocalSeal.open(sealedCopy, with: fixtureLocalKey) == plainCopy, try LocalSeal.seal(sealedCopy, with: fixtureLocalKey) == sealedCopy,
+              try LocalSeal.open(plainCopy, with: fixtureLocalKey) == plainCopy,
+              (try? LocalSeal.open(sealedCopy, with: SymmetricKey(data: Data(repeating: 8, count: 32)))) == nil,
+              try JSONDecoder().decode(BlockedNotes.List.self, from: Data(#"{"version":1,"notes":[{"id":"n1","title":"Untitled"}]}"#.utf8)).notes == [BlockedNotes.Entry(id: "n1", title: "Untitled")]
+        else { throw NotesError.message("Local encryption mismatch.") }
         // Folder colours: every picker value and its 70% alpha variant read back as that colour; -1 and others are grey.
         guard FolderColor.allCases.allSatisfy({ FolderColor(stored: $0.stored) == $0 }), FolderColor.red.stored == -48845,
               FolderColor(stored: Int(Int32(bitPattern: 0xB3FF_4133))) == .red, FolderColor(stored: -1) == .grey, FolderColor(stored: 0) == .grey,

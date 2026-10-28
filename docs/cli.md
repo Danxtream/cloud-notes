@@ -61,6 +61,10 @@ printf 'Milk\nEggs\n' | scnotes edit "Shopping list" --body-file -
 
 `edit --markdown` takes the same form: lines left exactly as `show --markdown` printed them keep their formatting byte for byte, and changed or new lines get the markup they carry on the note's usual size and colour. Without `--markdown`, the text is saved plain.
 
+## Blocked notes
+
+Notes blocked from Claude in the app's Settings (Claude tab), or with a note's right-click menu, are left out of `list` and `search`, and every command that opens or changes a note refuses them, with no override: the app's window is the place to read them. `sync` neither downloads nor decrypts them. The app keeps its copies of a blocked note on this Mac (cached document and attachments, backups, drafts) encrypted with a key kept beside the Samsung sign-in in the Keychain, and leaves its text preview out of the cached note list. The list itself is `BlockedNotes.json` in the app's data folder: note IDs, with each note's title when it was blocked.
+
 ## Editing safely
 
 `edit` follows the app's save path exactly: it downloads the current revision, refuses locked/encrypted notes and unsupported text, stores a pre-save backup under `Backups/`, uploads, then downloads again and verifies the title and text. If the note changed elsewhere in between, the save is refused.

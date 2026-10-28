@@ -199,14 +199,24 @@ enum CommandLineTool {
             }
             guard let snapshot = library.cache.snapshot() else { throw Failure(message: "No cached library yet. Run scnotes sync while online.") }
             library.index = snapshot.index
-            for record in library.index.notes { if let document = library.cache.document(record) { library.documents[record.id] = document } }
+            let blocked = BlockedNotes.ids()
+            for record in library.index.notes where !blocked.contains(record.id) { if let document = library.cache.document(record) { library.documents[record.id] = document } }
             return library
         }
         mutating func refresh() async throws {
             index = try await client.loadIndex()
             var failures = 0
+            // Blocked notes are never downloaded, decrypted or read here; they keep what the app last cached about them.
+            let blocked = BlockedNotes.ids()
+            let previous = Dictionary((cache.snapshot()?.index.notes ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             for position in index.notes.indices {
                 let record = index.notes[position]
+                if blocked.contains(record.id) {
+                    if let old = previous[record.id] {
+                        index.notes[position].title = old.title; index.notes[position].favorite = old.favorite; index.notes[position].created = old.created
+                    }
+                    continue
+                }
                 if record.locked || record.encrypted { continue }
                 var document = cache.document(record)
                 if document == nil {
@@ -233,8 +243,17 @@ enum CommandLineTool {
             if named.count > 1 { throw Failure(message: "\"\(query)\" matches \(named.count) folders; use a path:\n" + named.map { "  " + folders.path(of: $0.id) }.joined(separator: "\n")) }
             throw Failure(message: "No folder named \"\(query)\". Run scnotes folders.")
         }
+        /// The note `query` names: its ID, a unique ID prefix of at least four characters, or its exact title. Notes
+        /// blocked from Claude (see `BlockedNotes`) are refused and never offered as candidates.
         func resolve(_ query: String) throws -> NoteRecord {
-            let notes = index.notes
+            let blocked = BlockedNotes.ids()
+            func matches(_ note: NoteRecord) -> Bool {
+                note.id == query || (query.count >= 4 && note.id.hasPrefix(query)) || note.title.compare(query, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }
+            let notes = index.notes.filter { !blocked.contains($0.id) }
+            if !notes.contains(where: matches), index.notes.contains(where: { blocked.contains($0.id) && matches($0) }) {
+                throw Failure(message: "That note is blocked from Claude. Open it in the Samsung Cloud Notes app, or unblock it in the app's Settings.")
+            }
             if let exact = notes.first(where: { $0.id == query }) { return exact }
             let byPrefix = query.count >= 4 ? notes.filter { $0.id.hasPrefix(query) } : []
             if byPrefix.count == 1 { return byPrefix[0] }
@@ -280,7 +299,8 @@ enum CommandLineTool {
 
     @MainActor static func list(_ options: Options) async throws {
         let library = try await Library.load(offline: options.offline)
-        var notes = library.index.notes.filter { options.flags.contains("trash") ? $0.trashed : !$0.trashed }
+        let blocked = BlockedNotes.ids()
+        var notes = library.index.notes.filter { (options.flags.contains("trash") ? $0.trashed : !$0.trashed) && !blocked.contains($0.id) }
         if let folder = options.value("folder") {
             let target = try library.folder(folder)
             notes = notes.filter { $0.folder == target.id }
@@ -375,6 +395,9 @@ enum CommandLineTool {
         let folder = try library.folder(path)
         let inside = Set([folder.id] + library.index.folders.descendants(of: folder.id))
         let notes = library.index.notes.filter { !$0.trashed && inside.contains($0.folder) }
+        if notes.contains(where: { BlockedNotes.contains($0.id) }) {
+            throw Failure(message: "This folder holds a note blocked from Claude. Delete the folder in the Samsung Cloud Notes app instead.")
+        }
         try await library.client.trashFolder(folder.id, locked: Set(library.index.notes.filter { $0.locked || $0.encrypted }.map(\.resourceID)))
         print("Moved \(library.index.folders.path(of: folder.id)) and \(notes.count == 1 ? "its note" : "\(notes.count) notes") to the Trash. Samsung Notes deletes them for good after 30 days.")
     }
@@ -401,8 +424,9 @@ enum CommandLineTool {
 
     @MainActor static func search(_ query: String, _ options: Options) async throws {
         let library = try await Library.load(offline: options.offline)
+        let blocked = BlockedNotes.ids()
         let notes = library.index.notes.filter { record in
-            guard !record.trashed else { return false }
+            guard !record.trashed, !blocked.contains(record.id) else { return false }
             let text = record.title + "\n" + (library.documents[record.id].map { $0.title + "\n" + $0.body } ?? record.snippet)
             return text.localizedCaseInsensitiveContains(query)
         }
@@ -488,7 +512,7 @@ enum CommandLineTool {
         guard title != document.title || body != document.body || (styled != nil && styled != document.styledBody) else { print("No changes; the cloud copy already matches."); return }
         // Never overwrite an unsaved draft from the window app without consent.
         let draftURL = try LocalStore.directory("Drafts").appendingPathComponent(record.id + ".json")
-        if let data = try? Data(contentsOf: draftURL), let draft = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+        if let data = LocalSeal.read(draftURL), let draft = try? JSONSerialization.jsonObject(with: data) as? [String: String],
            draft["title"] != document.title || draft["body"] != document.body {
             guard options.flags.contains("discard-draft") else { throw Failure(message: "This note has an unsaved draft in the app. Save or reload it there, or pass --discard-draft to archive it and continue.") }
         }
@@ -516,7 +540,7 @@ enum CommandLineTool {
             else {
                 guard !library.offline else { throw Failure(message: "Attachment \(asset.fileName) is not cached. Export while online.") }
                 data = try await library.client.downloadAsset(asset)
-                try library.cache.saveAsset(data, id: asset.id, revision: document.commit)
+                try library.cache.saveAsset(data, id: asset.id, revision: document.commit, sealed: BlockedNotes.contains(document.serverID))
             }
             try data.write(to: destination.appendingPathComponent(safeName(asset.id)), options: [.atomic])
         }

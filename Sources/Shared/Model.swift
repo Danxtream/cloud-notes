@@ -314,7 +314,7 @@ import Combine
                 try LocalStore.writeDraft(id: id, title: doc.title, body: doc.body, commit: doc.commit)
             }
             if !force, let draftURL = try? LocalStore.directory("Drafts").appendingPathComponent(id + ".json"),
-               let draft = try? Data(contentsOf: draftURL),
+               let draft = LocalSeal.read(draftURL),
                let values = try? JSONSerialization.jsonObject(with: draft) as? [String: String],
                let draftTitle = values["title"], let draftBody = values["body"],
                draftBody != doc.body || draftTitle != doc.title || (values["styled"] != nil && values["styled"] != doc.bodyObject?.value("text")) {
@@ -436,7 +436,7 @@ import Combine
             current = found
         }
         let data = try await client.downloadAsset(current)
-        try cache?.saveAsset(data, id: asset.id, revision: document.commit)
+        try cache?.saveAsset(data, id: asset.id, revision: document.commit, sealed: BlockedNotes.contains(document.serverID))
         return data
     }
     func safeName(_ value: String) -> String {

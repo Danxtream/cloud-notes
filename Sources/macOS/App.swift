@@ -330,6 +330,12 @@ struct NotesView: View {
                     Button(note.isFavorite ? "Remove from Favorites" : "Add to Favorites") { Task { await model.setFavorite(note.id, !note.isFavorite) } }
                     Button("Move to Trash") { Task { await model.change(note: note.id, .trash) } }
                 }
+                Divider()
+                let blocked = BlockedNotes.contains(note.id)
+                Button(blocked ? "Unblock from Claude" : "Block from Claude") {
+                    do { try BlockedNotes.set(note.id, title: note.title, blocked: !blocked) }
+                    catch { model.error = (blocked ? "The note could not be unblocked: " : "The note is blocked, but its copies on this Mac could not all be encrypted: ") + error.localizedDescription }
+                }
             }
         } primaryAction: { ids in
             guard let id = ids.first else { return }
@@ -609,6 +615,7 @@ struct NotesView: View {
                     Button("Install Command Line Tool…") { CommandLineTool.installFromApp() }
                 }
             }
+        Settings { SettingsView() }
     }
 
 }

@@ -20,7 +20,9 @@ struct AccountSession: Codable {
     var nativeID: String? = nil
     var expiresAt: Date? = nil
     var importedAt: Date = Date()
-    enum CodingKeys: String, CodingKey { case authorization, account, nativeID, expiresAt }
+    /// The key for this device's encrypted copies of blocked notes (see `LocalSeal`), kept with the sign-in.
+    var localKey: Data? = nil
+    enum CodingKeys: String, CodingKey { case authorization, account, nativeID, expiresAt, localKey }
 }
 
 enum SessionStore {
@@ -30,13 +32,37 @@ enum SessionStore {
               !value.authorization.contains("\n"), !value.authorization.contains("\r") else {
             throw NotesError.message("This connection file does not contain a valid Samsung session.")
         }
+        // A renewed or newly imported session keeps this device's local key.
+        var value = value
+        if value.localKey == nil { value.localKey = try? stored()?.localKey }
         _ = try CredentialVault.perform("save", service: service, data: JSONEncoder().encode(value))
     }
     static func load() throws -> AccountSession {
-        guard let data = try CredentialVault.perform("load", service: service) else { throw CredentialError.status(errSecItemNotFound) }
-        return try JSONDecoder().decode(AccountSession.self, from: data)
+        guard let session = try stored(), !session.authorization.isEmpty else { throw CredentialError.status(errSecItemNotFound) }
+        return session
     }
-    static func delete() throws { _ = try CredentialVault.perform("delete", service: service) }
+    /// Removes the saved connection. This device's local key stays, so encrypted copies of blocked notes stay readable
+    /// after signing in again.
+    static func delete() throws {
+        if let key = try? stored()?.localKey {
+            _ = try CredentialVault.perform("save", service: service, data: JSONEncoder().encode(AccountSession(authorization: "", account: "", localKey: key)))
+        } else { _ = try CredentialVault.perform("delete", service: service) }
+    }
+    /// The key for this device's encrypted copies of blocked notes, made and stored on first use. A Keychain that
+    /// cannot be read is an error, never a reason to make a new key: that would leave earlier copies unreadable.
+    static func localKey() throws -> Data {
+        let record = try stored()
+        if let key = record?.localKey, key.count == 32 { return key }
+        var updated = record ?? AccountSession(authorization: "", account: "")
+        updated.localKey = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+        _ = try CredentialVault.perform("save", service: service, data: JSONEncoder().encode(updated))
+        return updated.localKey!
+    }
+    /// The stored record, including a signed-out one that only keeps the local key; nil when there is none.
+    private static func stored() throws -> AccountSession? {
+        do { return try CredentialVault.perform("load", service: service).map { try JSONDecoder().decode(AccountSession.self, from: $0) } }
+        catch CredentialError.status(let status) where status == errSecItemNotFound { return nil }
+    }
 }
 
 extension XMLElement {
@@ -807,15 +833,15 @@ enum LocalStore {
     }
     static func backup(_ document: CloudDocument) throws {
         let destination = try directory("Backups").appendingPathComponent("\(document.serverID)-\(Int(Date().timeIntervalSince1970 * 1000)).xml")
-        try document.original.write(to: destination, options: [.atomic])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+        try LocalSeal.write(document.original, to: destination, sealed: BlockedNotes.contains(document.serverID))
     }
     /// The note whose structure new notes copy (its downloaded XML), kept only on this device.
     static var noteTemplate: Data? { try? Data(contentsOf: root.appendingPathComponent("NoteTemplate.xml")) }
     /// The saved template, or the simplest suitable note among `documents`, saved for next time.
     static func noteTemplate(choosingFrom documents: [CloudDocument]) throws -> Data {
         if let saved = noteTemplate { return saved }
-        guard let candidate = CloudDocument.templateCandidate(documents) else {
+        let blocked = BlockedNotes.ids()
+        guard let candidate = CloudDocument.templateCandidate(documents.filter { !blocked.contains($0.serverID) }) else {
             throw NotesError.message("No plain text note to copy Samsung's note layout from yet. Make a short text note on another device, refresh, and try again.")
         }
         try saveNoteTemplate(candidate)
@@ -840,9 +866,7 @@ enum LocalStore {
         var values = ["title": title, "body": body, "commit": commit]
         if let styled { values["styled"] = styled }
         let data = try JSONSerialization.data(withJSONObject: values)
-        let url = try directory("Drafts").appendingPathComponent(id + ".json")
-        try data.write(to: url, options: [.atomic])
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try LocalSeal.write(data, to: try directory("Drafts").appendingPathComponent(id + ".json"), sealed: BlockedNotes.contains(id))
     }
     static func archiveDraft(id: String) throws {
         let source = try directory("Drafts").appendingPathComponent(id + ".json")
