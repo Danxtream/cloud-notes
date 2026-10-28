@@ -432,7 +432,14 @@ struct NotesView: View {
                     }.padding(10) }
                 }
                 if let issue = document.textIssue { Text(issue).font(.caption).foregroundStyle(.secondary).padding(10) }
-                if model.draftConflict { Text("This local draft is based on an older cloud revision. Reload the note to archive the draft and open the current cloud copy.").font(.caption).foregroundStyle(.orange).padding(10) }
+                if model.draftConflict {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("This local draft is based on an older cloud revision. Reload the note to archive the draft and open the current cloud copy.")
+                            .font(.caption).foregroundStyle(.orange)
+                        Spacer(minLength: 8)
+                        Button("Reload Note") { Task { await model.open(document.serverID, force: true) } }.controlSize(.small).disabled(model.busy)
+                    }.padding(10)
+                }
                 Divider()
                 HStack {
                     Text(model.saveStatus).foregroundStyle(model.saveError != nil || model.draftConflict ? .orange : .secondary).lineLimit(1)

@@ -522,7 +522,7 @@ enum CommandLineTool {
         var index = library.index
         if let position = index.notes.firstIndex(where: { $0.id == record.id }) { index.notes[position].commit = fresh.commit; index.notes[position].describe(fresh) }
         try library.cache.saveIndex(index)
-        try LocalStore.writeDraft(id: record.id, title: fresh.title, body: fresh.body, commit: fresh.commit, styled: fresh.bodyObject?.value("text"))
+        try LocalStore.writeDraft(id: record.id, title: fresh.title, body: fresh.body, commit: fresh.commit, styled: fresh.bodyObject?.value("text"), saved: true)
         print("Saved \"\(fresh.title.isEmpty ? record.title : fresh.title)\" to Samsung Cloud and verified the readback. A pre-save backup is in \(LocalStore.root.appendingPathComponent("Backups").path).")
     }
 

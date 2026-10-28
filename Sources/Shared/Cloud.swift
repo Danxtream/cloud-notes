@@ -861,10 +861,12 @@ enum LocalStore {
         if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close() }
         else { try? Data(line.utf8).write(to: url, options: [.atomic]); try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
     }
-    /// Keeps an unsaved title and text; `styled` is the text's formatting as Samsung's `<text>` value.
-    static func writeDraft(id: String, title: String, body: String, commit: String, styled: String? = nil) throws {
+    /// Keeps an unsaved title and text; `styled` is the text's formatting as Samsung's `<text>` value. `saved` marks a
+    /// copy of what was just saved as revision `commit`, which holds no unsaved work.
+    static func writeDraft(id: String, title: String, body: String, commit: String, styled: String? = nil, saved: Bool = false) throws {
         var values = ["title": title, "body": body, "commit": commit]
         if let styled { values["styled"] = styled }
+        if saved { values["saved"] = "true" }
         let data = try JSONSerialization.data(withJSONObject: values)
         try LocalSeal.write(data, to: try directory("Drafts").appendingPathComponent(id + ".json"), sealed: BlockedNotes.contains(id))
     }

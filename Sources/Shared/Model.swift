@@ -311,17 +311,24 @@ import Combine
             document = doc; title = doc.title; body = doc.body; styledBody = doc.styledBody; draftConflict = false
             if force {
                 try LocalStore.archiveDraft(id: id)
-                try LocalStore.writeDraft(id: id, title: doc.title, body: doc.body, commit: doc.commit)
+                try LocalStore.writeDraft(id: id, title: doc.title, body: doc.body, commit: doc.commit, styled: doc.bodyObject?.value("text"), saved: true)
             }
             if !force, let draftURL = try? LocalStore.directory("Drafts").appendingPathComponent(id + ".json"),
                let draft = LocalSeal.read(draftURL),
                let values = try? JSONSerialization.jsonObject(with: draft) as? [String: String],
                let draftTitle = values["title"], let draftBody = values["body"],
                draftBody != doc.body || draftTitle != doc.title || (values["styled"] != nil && values["styled"] != doc.bodyObject?.value("text")) {
-                title = draftTitle; body = draftBody
-                styledBody = values["styled"].flatMap { try? RichText(encoded: $0) }.map { RichText.numbered($0.styledRuns) }
-                draftConflict = values["commit"] != doc.commit
-                status = draftConflict ? "Draft is based on an older revision. Reload to archive it and use the cloud copy." : "Recovered unsaved changes; saving them to Samsung Cloud."
+                if values["saved"] == "true" {
+                    // Only a copy of what this Mac saved earlier; the cloud copy is newer (saved on another device), so the
+                    // copy goes to the draft history and the cloud copy is shown.
+                    try LocalStore.archiveDraft(id: id)
+                    try LocalStore.writeDraft(id: id, title: doc.title, body: doc.body, commit: doc.commit, styled: doc.bodyObject?.value("text"), saved: true)
+                } else {
+                    title = draftTitle; body = draftBody
+                    styledBody = values["styled"].flatMap { try? RichText(encoded: $0) }.map { RichText.numbered($0.styledRuns) }
+                    draftConflict = values["commit"] != doc.commit
+                    status = draftConflict ? "Draft is based on an older revision. Reload to archive it and use the cloud copy." : "Recovered unsaved changes; saving them to Samsung Cloud."
+                }
             }
         } catch {
             guard generation == taskGeneration, selection == id else { return }
@@ -403,8 +410,14 @@ import Combine
                 notes[i].commit = fresh.commit
                 try cache?.save(fresh, revision: fresh.commit)
             }
-            try LocalStore.writeDraft(id: id, title: savedTitle, body: savedBody, commit: fresh.commit, styled: fresh.bodyObject?.value("text"))
-            if selection == id { self.document = fresh }
+            if selection == id, title != savedTitle || body != savedBody || (styled != nil && styledBody != styled) {
+                // Typing that happened during the upload stays a draft, now on top of the new revision.
+                self.document = fresh; preserveDraft()
+            } else {
+                // A copy of what was saved, marked so: once another device saves a newer revision it is not unsaved work.
+                try LocalStore.writeDraft(id: id, title: savedTitle, body: savedBody, commit: fresh.commit, styled: fresh.bodyObject?.value("text"), saved: true)
+                if selection == id { self.document = fresh }
+            }
             if let i = notes.firstIndex(where: { $0.id == id }) { describe(i, document: fresh) }
             try cache?.saveIndex(CloudIndex(notes: notes, folders: folders))
             lastSaved = Date()
