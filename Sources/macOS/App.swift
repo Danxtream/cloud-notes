@@ -431,9 +431,14 @@ struct NotesView: View {
                     ForEach(Self.highlights, id: \.name) { color in Button(color.name) { formatting.setHighlight(color.argb) } }
                 } label: { Image(systemName: "highlighter") }.menuIndicator(.hidden).fixedSize().help("Highlight")
                 Menu {
-                    ForEach([("Small", 12.0), ("Normal", 16.0), ("Large", 20.0), ("Larger", 24.0), ("Huge", 32.0)], id: \.0) { name, size in
-                        Button(name) { formatting.setSize(size) }
+                    // The size at the cursor is ticked; a size from elsewhere (set on a phone, say) is shown above for reference.
+                    if !Self.textSizes.contains(where: { $0.points == formatting.selectionSize }) {
+                        Text("Current size (\(Self.sizeLabel(formatting.selectionSize)))")
+                        Divider()
                     }
+                    Picker("Text size", selection: Binding(get: { formatting.selectionSize }, set: { formatting.setSize($0) })) {
+                        ForEach(Self.textSizes, id: \.name) { size in Text("\(size.name) (\(Self.sizeLabel(size.points)))").tag(size.points) }
+                    }.pickerStyle(.inline).labelsHidden()
                 } label: { Image(systemName: "textformat.size") }.menuIndicator(.hidden).fixedSize().help("Text size")
             }
             HStack(spacing: 8) {
@@ -443,6 +448,10 @@ struct NotesView: View {
             }
         }.buttonStyle(.borderless).padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
     }
+    /// The size menu's choices (points).
+    static let textSizes: [(name: String, points: Double)] = [("Small", 12), ("Normal", 16), ("Large", 20), ("Larger", 24), ("Huge", 32)]
+    /// A size as Samsung Notes writes it: 16, or 15.5 for half points.
+    static func sizeLabel(_ points: Double) -> String { points == points.rounded() ? String(Int(points)) : String(format: "%.1f", points) }
     static let textColors: [(name: String, argb: UInt32)] = [("Red", 0xFFE5_3935), ("Orange", 0xFFFB_8C00), ("Green", 0xFF43_A047),
                                                              ("Blue", 0xFF1E_88E5), ("Purple", 0xFF8E_24AA), ("Grey", 0xFF75_7575)]
     static let highlights: [(name: String, argb: UInt32)] = [("Yellow", 0xFFFF_F59D), ("Green", 0xFFC5_E1A5), ("Blue", 0xFF90_CAF9), ("Pink", 0xFFF4_8FB1)]

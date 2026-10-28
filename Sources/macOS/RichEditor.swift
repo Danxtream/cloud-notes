@@ -12,6 +12,17 @@ extension NSAttributedString.Key {
     fileprivate var changed: () -> Void = {}
     /// Connects the controller to an editor's text view; `RichTextEditor` does this itself.
     func attach(_ textView: NoteTextView, changed: @escaping () -> Void) { self.textView = textView; self.changed = changed }
+    /// The text size (points) at the cursor or the selection's start, for the size menu; 16 where none is set, as the
+    /// editor draws it.
+    @Published private(set) var selectionSize: Double = 16
+    /// Updates `selectionSize` after the selection or its styles change, outside SwiftUI's view updates.
+    func refreshSelection() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let size = RichStyle.fontSize(self.currentStyles["span/fontSize"]) ?? 16
+            if size != self.selectionSize { self.selectionSize = size }
+        }
+    }
 
     /// Turns bold, italic, underline or strikethrough on for the selection, or off when its start already has it.
     func toggle(_ key: String) {
@@ -61,6 +72,7 @@ extension NSAttributedString.Key {
         storage.endEditing()
         textView.didChangeText()
         textView.typingAttributes = storage.length > 0 ? storage.attributes(at: min(textView.selectedRange().location, storage.length - 1), effectiveRange: nil) : textView.typingAttributes
+        refreshSelection()
     }
 }
 
@@ -180,6 +192,7 @@ struct RichTextEditor: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) { publish() }
+        func textViewDidChangeSelection(_ notification: Notification) { parent.controller.refreshSelection() }
 
         /// Sends the text to the model, first redrawing paragraphs whose styles normalizing or numbering changed.
         func publish() {
