@@ -182,11 +182,15 @@ struct NotesView: View {
                         Image(systemName: "folder").foregroundStyle(node.folder.folderColor.shown.map { AnyShapeStyle(Self.shade($0)) } ?? AnyShapeStyle(.secondary))
                     }
                     .tag(node.id)
+                    .draggable("scnotes-folder:" + node.id)
+                    .dropDestination(for: String.self) { items, _ in moveDroppedFolder(items, to: node.id) }
                     .contextMenu { folderMenu(node.folder) }
                 }
             } header: {
                 HStack {
                     Text("Folders")
+                        .help("Drop a folder here to move it to the top level")
+                        .dropDestination(for: String.self) { items, _ in moveDroppedFolder(items, to: "root") }
                     Spacer()
                     Button { newFolderParent = nil; newFolderName = ""; creatingFolder = true } label: { Image(systemName: "plus") }
                         .buttonStyle(.borderless).disabled(model.busy || model.account.isEmpty)
@@ -297,11 +301,33 @@ struct NotesView: View {
             Group {
                 Button("New Subfolder…") { newFolderParent = folder.id; newFolderName = ""; creatingFolder = true }
                 Button("Rename…") { folderNewName = folder.name; renamingFolder = folder }
+                Menu("Move Folder To") {
+                    if folder.parent != "root" {
+                        Button("Top Level") { Task { await model.moveFolder(folder.id, to: "root") } }
+                    }
+                    ForEach(model.folders.filter { canMoveFolder(folder.id, to: $0.id) }) { destination in
+                        Button(model.folders.path(of: destination.id)) { Task { await model.moveFolder(folder.id, to: destination.id) } }
+                    }
+                }
                 Menu("Change Folder Colour") { folderColourMenu(folder) }
                 Divider()
                 Button("Delete Folder…", role: .destructive) { deletingFolder = folder }
             }.disabled(model.busy || model.account.isEmpty)
         }
+    }
+    func canMoveFolder(_ id: String, to parent: String) -> Bool {
+        guard !model.busy, !model.account.isEmpty,
+              let source = model.folders.first(where: { $0.id == id }),
+              !id.contains(":///"), !parent.contains(":///"), source.parent != parent,
+              id != parent, !model.folders.descendants(of: id).contains(parent) else { return false }
+        return parent == "root" || model.folders.contains(where: { $0.id == parent })
+    }
+    func moveDroppedFolder(_ items: [String], to parent: String) -> Bool {
+        guard items.count == 1, let item = items.first, item.hasPrefix("scnotes-folder:") else { return false }
+        let id = String(item.dropFirst("scnotes-folder:".count))
+        guard canMoveFolder(id, to: parent) else { return false }
+        Task { await model.moveFolder(id, to: parent) }
+        return true
     }
     /// A folder's Colour menu: Samsung Notes' twelve folder colours with a swatch each, the current one ticked.
     /// Built-in folders such as Math notes keep Samsung's colour.
@@ -523,8 +549,16 @@ struct NotesView: View {
             catch { fputs("Session import failed: \(error.localizedDescription)\n", stderr); exit(1) }
         }
         if CommandLine.arguments.contains("--self-test") {
-            do { try SelfTest.run(); print("Offline self-tests passed."); exit(0) }
-            catch { fputs("Self-test failed: \(error.localizedDescription)\n", stderr); exit(1) }
+            Task { @MainActor in
+                do {
+                    try SelfTest.run()
+                    try await NotesModel.testImmediateFolderMoves()
+                    print("Offline self-tests passed (including immediate folder moves and rollback).")
+                    exit(0)
+                } catch { fputs("Self-test failed: \(error.localizedDescription)\n", stderr); exit(1) }
+            }
+            // Service async model checks before creating windows or connecting the app's real model.
+            RunLoop.main.run()
         }
         if CommandLine.arguments.contains("--verify-signout") {
             Task { @MainActor in

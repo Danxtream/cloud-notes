@@ -7,7 +7,7 @@ import FoundationXML
 import CryptoKit
 import Security
 
-let appVersion = "2.0.0"
+let appVersion = "2.0.1"
 let appShortVersion = appVersion.components(separatedBy: "-")[0]
 /// The name people see: Finder, the Dock, the menu bar, window titles and scnotes. The bundle ID, executable,
 /// data folder and Keychain helper keep the original project's names so sign-in and local data carry over.
@@ -646,6 +646,58 @@ final class CloudClient {
         _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
         guard try await treeNodes().contains(where: { $0.id == id && $0.name == name }) else {
             throw NotesError.message("Samsung accepted the request, but the folder kept its old name. Refresh before trying again.")
+        }
+    }
+    /// Reparents only the folder node: descendants and notes keep their IDs and parent links.
+    /// Validate against a fresh tree before submitting, including the entire destination chain.
+    static func moveFolderNodes(_ id: String, to parent: String, in nodes: [XMLElement], now: Int64) throws -> [TreeNodeFields] {
+        guard !id.contains(":///"), !parent.contains(":///") else {
+            throw NotesError.message("Built-in folders cannot be moved or contain subfolders.")
+        }
+        let normal = nodes.filter { $0.attr("type") == "folder" && $0.value("state") == "normal" }
+        guard let source = normal.first(where: { $0.attr("id") == id }) else {
+            throw NotesError.message("The folder no longer exists. Refresh and try again.")
+        }
+        var visited: Set<String> = [id], current = parent
+        while current != "root" {
+            guard visited.insert(current).inserted else {
+                throw NotesError.message("A folder cannot be moved into itself or its subfolders, or into a circular folder tree.")
+            }
+            guard !current.contains(":///"), let ancestor = normal.first(where: { $0.attr("id") == current }) else {
+                throw NotesError.message("The destination folder no longer exists or has an invalid path. Refresh and try again.")
+            }
+            current = ancestor.value("parentFolderNodeId")
+        }
+        var fields = TreeNodeFields(source)
+        if fields.parent == parent { return [] }
+        let name = decodedCloudName(fields.encodedName)
+        let siblings = normal.filter { $0.value("parentFolderNodeId") == parent && $0.attr("id") != id }
+        guard !siblings.contains(where: { decodedCloudName($0.value("name")).compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) else {
+            throw NotesError.message("A folder named \"\(name)\" already exists there.")
+        }
+        let oldParent = fields.parent
+        fields.parent = parent; fields.modified = now
+        fields.order = (siblings.compactMap { Int($0.value("order")) }.max() ?? -1) + 1
+        var changed = [fields], included: Set<String> = [id]
+        for ancestor in Self.ancestors(of: parent, in: nodes) + Self.ancestors(of: oldParent, in: nodes) {
+            if included.insert(ancestor.id).inserted {
+                var value = ancestor
+                if value.id == parent || value.id == oldParent { value.modified = now }
+                changed.append(value)
+            }
+        }
+        return changed
+    }
+    func moveFolder(_ id: String, to parent: String) async throws {
+        let nodes = try await treeElements()
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let changed = try Self.moveFolderNodes(id, to: parent, in: nodes, now: now)
+        guard !changed.isEmpty else { return }
+        let latest = nodes.compactMap { Int64($0.value("syncModifiedTime")) }.max() ?? 0
+        let body = Self.folderResourceXML(changed, latestSync: latest, now: now)
+        _ = try await request("/samsungnotes/v1/folder", method: "PATCH", body: body, contentType: "application/xml;Charset=utf-8")
+        guard try await treeNodes().contains(where: { $0.id == id && $0.parent == parent && $0.state == "normal" }) else {
+            throw NotesError.message("Samsung accepted the request, but the folder move was not confirmed. Refresh before trying again.")
         }
     }
     /// The tree nodes for moving folder `id` to the Trash as Samsung Notes 4.4.48 does (seen on a phone): the folder moves

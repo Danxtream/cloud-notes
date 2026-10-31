@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 — 2026-10-31
+
+- Mac: move folders between branches by dragging onto another folder or using **Move Folder To**. Choose **Top Level**, or drop onto the **Folders** heading, to remove nesting. Subfolders, notes and colours are retained.
+- Folder moves appear immediately, then sync. Failed or unconfirmed moves restore the previous position and display an error; successful moves update the cache without reloading the library.
+- Invalid nesting, built-in folders, missing destinations and duplicate sibling names are rejected. Offline checks cover folder request construction, immediate local updates and rollback.
+- Includes all 2.0.0 changes, including the renamed app, licence notices and removal of the Windows connection importer.
+
 ## 2.0.0 — 2026-10-28
 
 Cloud Notes for Samsung Notes: this version continues Samsung Cloud Notes 1.1 by Clascheurduturfu under a new name and license. Source only; there are no downloads.

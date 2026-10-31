@@ -317,6 +317,77 @@ import Network
             status = "Renamed the folder to \(name.trimmingCharacters(in: .whitespacesAndNewlines))"
         } catch { busy = false; self.error = error.localizedDescription; status = "The folder was not renamed." }
     }
+    /// Update the visible tree before the first network suspension; the client verifies the cloud parent.
+    func moveFolder(_ id: String, to parent: String) async {
+        guard let client, !busy else { return }
+        await applyFolderMove(id, to: parent) { try await client.moveFolder(id, to: parent) }
+    }
+    /// Serializes tree changes while syncing, preserving note selection and rolling back an unconfirmed move.
+    /// The sync operation is supplied separately so timing and failure behavior can be checked offline.
+    func applyFolderMove(_ id: String, to parent: String, sync: () async throws -> Void) async {
+        guard !busy, let source = folders.first(where: { $0.id == id }) else { return }
+        guard source.parent != parent else { return }
+        do {
+            guard !id.contains(":///"), !parent.contains(":///") else { throw NotesError.message("Built-in folders cannot be moved or contain subfolders.") }
+            var seen: Set<String> = [id], current = parent
+            while current != "root" {
+                guard seen.insert(current).inserted, !current.contains(":///"), let next = folders.first(where: { $0.id == current }) else {
+                    throw NotesError.message("The destination is missing or would create a circular folder tree.")
+                }
+                current = next.parent
+            }
+            guard !folders.contains(where: { $0.id != id && $0.parent == parent && $0.name.compare(source.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) else {
+                throw NotesError.message("A folder with this name already exists there.")
+            }
+        } catch { self.error = error.localizedDescription; return }
+        preserveDraft()
+        let previous = folders
+        var moved = source; moved.parent = parent
+        // Append to match the cloud move's ordering after the destination's existing children.
+        folders = folders.filter { $0.id != id } + [moved]
+        busy = true; status = "Folder moved locally · Syncing…"
+        defer { busy = false }
+        do { try await sync() }
+        catch {
+            folders = previous
+            self.error = error.localizedDescription
+            status = "Folder sync failed · Previous position restored. Refresh before trying again."
+            return
+        }
+        status = "Moved folder to \(parent == "root" ? "the top level" : folders.path(of: parent)) · Synced"
+        // Do not reload the full library: the cloud parent has already been read back and confirmed.
+        do { try cache?.saveIndex(CloudIndex(notes: notes, folders: folders)) }
+        catch { self.error = "The folder synced, but its local cache could not be updated: " + error.localizedDescription }
+    }
+    /// Synthetic model regression checks; no account, network or cache is opened.
+    static func testImmediateFolderMoves() async throws {
+        let model = NotesModel()
+        let initial = [FolderRecord(id: "a", name: "A", parent: "root"), FolderRecord(id: "b", name: "B", parent: "a", color: 7),
+                       FolderRecord(id: "c", name: "C", parent: "root"), FolderRecord(id: "d", name: "D", parent: "b")]
+        model.folders = initial; model.folder = "b"
+        var submitted = false
+        await model.applyFolderMove("b", to: "c") {
+            submitted = true
+            guard model.folders.first(where: { $0.id == "b" })?.parent == "c", model.busy else {
+                throw NotesError.message("The local tree did not move before syncing.")
+            }
+            await Task.yield()
+            guard model.folders.first(where: { $0.id == "b" })?.parent == "c" else { throw NotesError.message("Move disappeared while syncing.") }
+        }
+        guard submitted, model.error == nil, !model.busy, model.folder == "b",
+              model.folders.first(where: { $0.id == "b" })?.parent == "c",
+              model.folders.first(where: { $0.id == "b" })?.color == 7,
+              model.folders.first(where: { $0.id == "d" })?.parent == "b" else { throw NotesError.message("Immediate folder move failed.") }
+        model.folders = initial
+        await model.applyFolderMove("b", to: "c") { throw NotesError.message("Synthetic sync failure") }
+        guard model.folders.map(\.parent) == initial.map(\.parent), model.folders.map(\.id) == initial.map(\.id),
+              model.error == "Synthetic sync failure", !model.busy else { throw NotesError.message("Failed move was not rolled back.") }
+        for (source, destination) in [("a", "d"), ("b", "b"), ("b", "missing")] {
+            submitted = false; model.error = nil
+            await model.applyFolderMove(source, to: destination) { submitted = true }
+            guard !submitted, model.error != nil, model.folders.map(\.parent) == initial.map(\.parent) else { throw NotesError.message("Invalid local move was submitted.") }
+        }
+    }
     /// Moves a folder, its subfolders and their notes to the Trash in Samsung Cloud, then shows All notes if the
     /// selected folder went with it.
     func trashFolder(_ id: String) async {

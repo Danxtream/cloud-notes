@@ -2,6 +2,10 @@
 
 ## macOS
 
+Build this `Danxtream/cloud-notes` checkout. The former `samsung-cloud-notes-archive` repository is historical and does not receive current changes. On the maintainer's Mac, the active checkout is `~/dev/repos/cloud-notes`.
+
+If the Command Line Tools select an SDK newer than their Swift compiler supports, select a matching installed SDK explicitly, for example `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash scripts/build-macos.sh`.
+
 `bash scripts/build-macos.sh` creates `dist/Cloud Notes for Samsung Notes.app`, generates its icon, includes notices, signs and runs offline self-tests. Both architectures target macOS 13; `BUILD_UNIVERSAL=0` builds Apple Silicon only.
 
 The first build needs a graphical login session and unlocked login Keychain. Setup imports a local code-signing-only identity. Its public fingerprint is remembered under `~/Library/Application Support/SamsungCloudNotes/SigningIdentity.txt`; the private key stays in Keychain. Loose keys, temporary P12 and password files are removed. No system/TLS trust root is installed. Remote builds use LaunchServices for setup/signing and may require approval.

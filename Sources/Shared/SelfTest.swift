@@ -86,6 +86,37 @@ enum SelfTest {
               sent[1].value("createdTime") == "1", sent[1].value("lastModifiedTime") == "2", sent[1].value("order") == "4",
               CloudClient.ancestors(of: "root", in: treeNodes).isEmpty, CloudClient.ancestors(of: "x", in: treeNodes).map(\.id) == ["x", "y"],
               CloudClient.ancestors(of: "n", in: treeNodes).isEmpty else { throw NotesError.message("Parent folders in a nested request mismatch.") }
+        // Cross-branch moves preserve metadata; descendants/notes stay linked to the same IDs.
+        let moved = try CloudClient.moveFolderNodes("b", to: "root", in: treeNodes, now: 99)
+        guard moved.map(\.id) == ["b", "a"], moved[0].parent == "root", moved[0].created == 1,
+              moved[0].modified == 99, moved[0].color == -1, moved[0].order == 5,
+              decodedCloudName(moved[0].encodedName) == "Repos",
+              try CloudClient.moveFolderNodes("b", to: "a", in: treeNodes, now: 99).isEmpty else {
+            throw NotesError.message("Folder move metadata mismatch.")
+        }
+        let moveTree = try XMLDocument(xmlString: "<r>" + treeNode("a", "folder", "root", "Dev") + treeNode("b", "folder", "a", "Repos")
+            + treeNode("c", "folder", "root", "Other") + treeNode("d", "folder", "c", "Destination") + treeNode("n", "note", "b", "Note") + "</r>", options: [.nodeLoadExternalEntitiesNever])
+        let moveNodes = moveTree.rootElement()?.elements(forName: "node") ?? []
+        let crossBranch = try CloudClient.moveFolderNodes("b", to: "d", in: moveNodes, now: 99)
+        guard crossBranch.map(\.id) == ["b", "d", "c", "a"], crossBranch[0].parent == "d",
+              crossBranch[0].order == 0, moveNodes.first(where: { $0.attr("id") == "n" })?.value("parentFolderNodeId") == "b" else {
+            throw NotesError.message("Cross-branch move mismatch.")
+        }
+        let sameBranch = try CloudClient.moveFolderNodes("b", to: "c", in: moveNodes, now: 99)
+        guard Set(sameBranch.map(\.id)).count == sameBranch.count else { throw NotesError.message("Move ancestor duplication.") }
+        for (source, destination) in [("a", "a"), ("a", "b"), ("b", "gone"), ("gone", "root"), ("n", "root"), ("b", "n"), ("b", "x"), ("b", "math:///"), ("math:///", "root")] {
+            var rejected = false
+            do { _ = try CloudClient.moveFolderNodes(source, to: destination, in: treeNodes, now: 99) } catch { rejected = true }
+            guard rejected else { throw NotesError.message("Invalid folder move was accepted: \(source) to \(destination).") }
+        }
+        let duplicate = try XMLDocument(xmlString: "<r>" + treeNode("a", "folder", "root", "Répos") + treeNode("b", "folder", "a", "repos") + "</r>", options: [.nodeLoadExternalEntitiesNever])
+        var duplicateRejected = false
+        do { _ = try CloudClient.moveFolderNodes("b", to: "root", in: duplicate.rootElement()?.elements(forName: "node") ?? [], now: 99) } catch { duplicateRejected = true }
+        guard duplicateRejected else { throw NotesError.message("Duplicate folder name accepted during move.") }
+        let moveXML = try XMLDocument(data: CloudClient.folderResourceXML(crossBranch, latestSync: 5, now: 99), options: [.nodeLoadExternalEntitiesNever])
+        guard moveXML.rootElement()?.first("nodeList")?.elements(forName: "node").first?.value("parentFolderNodeId") == "d" else {
+            throw NotesError.message("Folder move XML mismatch.")
+        }
         let tree = [FolderRecord(id: "a", name: "Dev", parent: "root"), FolderRecord(id: "b", name: "Repos", parent: "a")]
         guard CloudClient.restorePath(of: "b", folders: tree) == "uncategorized:///Dev/Repos", CloudClient.restorePath(of: "root", folders: tree) == "uncategorized:///",
               CloudClient.restoreParent("uncategorized:///Dev/Repos", folders: tree) == "b", CloudClient.restoreParent("uncategorized:///Gone", folders: tree) == "root",
