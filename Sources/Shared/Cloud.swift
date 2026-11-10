@@ -267,8 +267,8 @@ final class CloudDocument {
     func uploadXML(title newTitle: String, body newBody: String, styled: [RichRun]? = nil, favorite: Bool? = nil, now: Date = Date()) throws -> Data {
         if let textIssue { throw NotesError.message(textIssue) }
         if let favorite { resource.first("attributes")?.set("isFavorite", favorite ? "true" : "false") }
-        if resource.attr("isEncrypted") == "true" || resource.attr("isLocked") == "true" {
-            throw NotesError.message("Locked or encrypted notes cannot be edited by this version.")
+        if resource.attr("isEncrypted") == "true" {
+            throw NotesError.message("Encrypted notes cannot be edited by this version.")
         }
         // Repair objects an earlier version of this client left unreadable on Samsung devices (see updateObject).
         if let object = bodyObject, let tree = resource.first("noteTree")?.first("bodyText"), Int32(object.attr("timeStamp")) == nil, !object.attr("timeStamp").isEmpty {
@@ -308,6 +308,9 @@ final class CloudDocument {
         // old time it takes the new commit id but keeps its old text ("handleSameTimeNotes" in its log), so the edit
         // never reaches the phone and a later edit there would overwrite it. Samsung stores the time as sent.
         resource.set("syncModifiedTime", millis)
+        // Samsung returns a locked note with its owner only in `attributes`, and refuses an update whose
+        // `noteResource` has no owner (400 "Request payload invalid").
+        if resource.attr("ownerId").isEmpty, let owner = resource.first("attributes")?.attr("ownerId"), !owner.isEmpty { resource.set("ownerId", owner) }
         return resource.bytes
     }
     /// Removes an object's span order data, which describes the styled runs of the text being replaced; the new text is
@@ -463,16 +466,40 @@ final class CloudClient {
             "modifiedTime": 0, "appVersion": "0", "sdkVersion": "0", "purpose": "INITIAL", "type": type]
         return try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]).base64EncodedString()
     }
+    private struct IndexCheckpoint: Codable { var cursor: String; var notes: [String: NoteRecord] }
+    private var checkpointURL: URL {
+        let hash = SHA256.hash(data: Data(account.account.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+        return LocalStore.root.appendingPathComponent("Cache", isDirectory: true).appendingPathComponent("NoteIndexCheckpoint-\(hash).json")
+    }
+    private func saveCheckpoint(_ checkpoint: IndexCheckpoint) {
+        let url = checkpointURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        if let data = try? JSONEncoder().encode(checkpoint) { try? data.write(to: url, options: .atomic) }
+    }
     func loadIndex() async throws -> CloudIndex {
-        var cursor = Self.initialCursor("NOTE")
+        let initial = Self.initialCursor("NOTE")
+        var cursor = initial
         var notes: [String: NoteRecord] = [:]
+        if let data = try? Data(contentsOf: checkpointURL), let saved = try? JSONDecoder().decode(IndexCheckpoint.self, from: data), !saved.cursor.isEmpty {
+            cursor = saved.cursor; notes = saved.notes
+        }
+        var resumed = cursor != initial
         var seen = Set<String>()
         var completed = false
+        var pages = 0
         for _ in 0..<10_000 {
             guard seen.insert(cursor).inserted else { throw NotesError.message("Samsung returned a repeated pagination cursor.") }
             let query = URLQueryItem(name: "lastChangePoint", value: cursor)
             var parts = URLComponents(); parts.queryItems = [query]
-            let data = try await request("/samsungnotes/v1/notes/changes?" + parts.percentEncodedQuery!)
+            let data: Data
+            do { data = try await request("/samsungnotes/v1/notes/changes?" + parts.percentEncodedQuery!) }
+            catch where resumed {
+                // The saved position was rejected: start over from the beginning.
+                resumed = false; cursor = initial; notes = [:]; seen = []
+                try? FileManager.default.removeItem(at: checkpointURL)
+                continue
+            }
+            resumed = false
             let document = try XMLDocument(data: data, options: [.nodeLoadExternalEntitiesNever])
             guard let root = document.rootElement(), root.name == "NoteChangesView" else { throw NotesError.message("Samsung returned an unexpected note index.") }
             for change in root.elements(forName: "changes") {
@@ -482,9 +509,15 @@ final class CloudClient {
                     modified: Double(change.value("serverModifiedTime")) ?? 0,
                     locked: change.value("isLocked") == "true", encrypted: change.value("isEncrypted") == "true")
             }
-            if root.value("hasNext") != "true" { completed = true; break }
-            cursor = root.value("lastChangePoint")
+            let next = root.value("lastChangePoint")
+            pages += 1
+            if root.value("hasNext") != "true" {
+                if !next.isEmpty { saveCheckpoint(IndexCheckpoint(cursor: next, notes: notes)) }
+                completed = true; break
+            }
+            cursor = next
             if cursor.isEmpty { throw NotesError.message("Samsung omitted the next pagination cursor.") }
+            if pages % 20 == 0 { saveCheckpoint(IndexCheckpoint(cursor: cursor, notes: notes)) }
         }
         guard completed else { throw NotesError.message("The note index exceeded the pagination limit.") }
         var components = URLComponents(); components.queryItems = [URLQueryItem(name: "lastChangePoint", value: Self.initialCursor("FOLDER"))]

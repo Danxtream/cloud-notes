@@ -2,6 +2,7 @@
 
 import SwiftUI
 import AppKit
+import PDFKit
 #if canImport(FoundationXML)
 import FoundationXML
 #endif
@@ -66,6 +67,7 @@ struct NotesView: View {
     @StateObject var model = NotesModel()
     @StateObject var formatting = RichTextController()
     @State var showDrawing = false
+    @State var pdfChoice: [String: Bool] = [:]
     @State var creatingFolder = false
     @State var newFolderName = ""
     /// The folder a new folder goes into when created from a folder's menu; nil for the + button's usual place.
@@ -131,6 +133,7 @@ struct NotesView: View {
         .onChange(of: model.folder) { _ in model.preserveDraft(); model.selection = model.visibleNotes.first?.id }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.preserveDraft() }
         .task { await model.connect() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await model.autoRefresh() } }
         .background(GeometryReader { proxy in Color.clear.onAppear { adapt(to: proxy.size.width) }.onChange(of: proxy.size.width) { adapt(to: $0) } })
         .onChange(of: model.selection) { if $0 == nil && noteFullView { showList() } }
         .frame(minWidth: 440, minHeight: 400)
@@ -362,7 +365,7 @@ struct NotesView: View {
         ScrollViewReader { proxy in
         List(model.visibleNotes, selection: $model.selection) { note in
             VStack(alignment: .leading, spacing: 5) {
-                HStack { Text(note.locked ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
+                HStack { Text(note.encrypted ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
                     if note.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Favorite") }
                     if note.locked || note.encrypted { Image(systemName: "lock") }
                     if model.conflicted.contains(note.id) {
@@ -478,7 +481,16 @@ struct NotesView: View {
                         Button("Open drawing PDF") { model.showDrawing() }
                     }.padding(10)
                 }
-                if showDrawing && !document.drawingPages.isEmpty { DrawingPreview(pages: document.drawingPages) }
+                let pdfAssets = document.assets.filter { !$0.isInternal && ($0.fileName as NSString).pathExtension.lowercased() == "pdf" }
+                let showPDF = !pdfAssets.isEmpty && (pdfChoice[document.serverID] ?? model.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if !pdfAssets.isEmpty {
+                    HStack {
+                        Picker("View", selection: Binding(get: { showPDF }, set: { pdfChoice[document.serverID] = $0 })) { Text("Text").tag(false); Text("PDF").tag(true) }.pickerStyle(.segmented).frame(width: 190)
+                        Spacer()
+                    }.padding(10)
+                }
+                if showPDF, let first = pdfAssets.first { AttachmentPDFView(asset: first, document: document, model: model) }
+                else if showDrawing && !document.drawingPages.isEmpty { DrawingPreview(pages: document.drawingPages) }
                 else if model.styledBody != nil, document.bodyObject != nil {
                     if model.editable { formatBar.disabled(model.busy); Divider() }
                     RichTextEditor(noteID: document.serverID, runs: Binding(get: { model.styledBody ?? [] }, set: { model.styledBody = $0 }), text: $model.body,
@@ -737,4 +749,38 @@ struct FlowLayout: Layout {
         }
         return rows
     }
+}
+
+
+struct AttachmentPDFView: View {
+    let asset: AssetRecord
+    let document: CloudDocument
+    @ObservedObject var model: NotesModel
+    @State private var pdf: PDFDocument?
+    @State private var failure: String?
+    var body: some View {
+        Group {
+            if let pdf { PDFKitRepresentable(document: pdf) }
+            else if let failure { Text(failure).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else { ProgressView("Loading PDF…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }
+        .task(id: asset.id + document.commit) {
+            pdf = nil; failure = nil
+            do {
+                let data = try await model.attachmentData(asset, document: document)
+                if let loaded = PDFDocument(data: data) { pdf = loaded } else { failure = "This attachment is not a readable PDF." }
+            } catch { failure = error.localizedDescription }
+        }
+    }
+}
+
+struct PDFKitRepresentable: NSViewRepresentable {
+    let document: PDFDocument
+    func makeNSView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true; view.displayMode = .singlePageContinuous; view.displaysPageBreaks = true
+        view.document = document
+        return view
+    }
+    func updateNSView(_ view: PDFView, context: Context) { if view.document !== document { view.document = document } }
 }

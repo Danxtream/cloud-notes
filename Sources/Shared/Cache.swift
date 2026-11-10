@@ -46,7 +46,7 @@ final class NoteCache {
         try write(JSONEncoder().encode(Snapshot(updated: updated, index: index)), to: root.appendingPathComponent("index.json"))
     }
     func document(_ record: NoteRecord) -> CloudDocument? {
-        guard !record.locked && !record.encrypted,
+        guard !record.encrypted,
               let data = LocalSeal.read(url(record.id, kind: "note")),
               let entry = try? JSONDecoder().decode(Entry.self, from: data), entry.revision == record.commit else { return nil }
         return try? CloudDocument(serverID: record.id, data: entry.xml)
@@ -65,7 +65,7 @@ final class NoteCache {
         try write(sealed ? LocalSeal.seal(data) : data, to: url(id + ":" + revision, kind: "asset"))
     }
     func prune(_ records: [NoteRecord]) throws {
-        let keep = Set(records.filter { !$0.locked && !$0.encrypted }.map { url($0.id, kind: "note").lastPathComponent })
+        let keep = Set(records.filter { !$0.encrypted }.map { url($0.id, kind: "note").lastPathComponent })
         for file in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) where file.lastPathComponent.hasPrefix("note-") && !keep.contains(file.lastPathComponent) {
             try FileManager.default.removeItem(at: file)
         }
