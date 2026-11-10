@@ -29,6 +29,8 @@ import Network
     /// Whether this device has a network connection.
     @Published var online = true
     private var pathMonitor: NWPathMonitor?
+    private var autoRefreshTask: Task<Void, Never>?
+    private var lastEdit = Date.distantPast
     private var retryTask: Task<Void, Never>?
     private var syncing = false
     @Published var error: String?
@@ -82,8 +84,24 @@ import Network
             restoreCache()
             if let id = selection { await open(id) }
             watchNetwork()
+            startAutoRefresh()
             if !cacheOnly { await refreshAndSync() }
         } catch { status = error.localizedDescription }
+    }
+    /// Checks Samsung Cloud for changes from other devices every 15 seconds, and when the app comes to the front.
+    func startAutoRefresh() {
+        guard autoRefreshTask == nil else { return }
+        autoRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                await self?.autoRefresh()
+            }
+        }
+    }
+    /// A quiet refresh: skipped while typing or while an edit is still unsaved, so it never interrupts the editor.
+    func autoRefresh() async {
+        guard client != nil, online, !busy, !syncing, !dirty, Date().timeIntervalSince(lastEdit) > 5 else { return }
+        await refreshAndSync()
     }
     /// Refreshes the library, then saves notes waiting to sync.
     func refreshAndSync() async { await refresh(); await syncPending() }
@@ -521,7 +539,7 @@ import Network
         draftTask = Task { try? await Task.sleep(nanoseconds: 600_000_000); if !Task.isCancelled { preserveDraft() } }
     }
     /// Called for every change to the title or text: keeps a local draft at once and saves to Samsung Cloud after a pause.
-    func edited() { scheduleDraft(); scheduleAutosave() }
+    func edited() { lastEdit = Date(); scheduleDraft(); scheduleAutosave() }
     func scheduleAutosave() {
         autosaveTask?.cancel()
         guard dirty, editable else { unsavedSince = nil; return }

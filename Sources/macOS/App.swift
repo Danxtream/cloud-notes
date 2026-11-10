@@ -133,6 +133,7 @@ struct NotesView: View {
         .onChange(of: model.folder) { _ in model.preserveDraft(); model.selection = model.visibleNotes.first?.id }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.preserveDraft() }
         .task { await model.connect() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await model.autoRefresh() } }
         .background(GeometryReader { proxy in Color.clear.onAppear { adapt(to: proxy.size.width) }.onChange(of: proxy.size.width) { adapt(to: $0) } })
         .onChange(of: model.selection) { if $0 == nil && noteFullView { showList() } }
         .frame(minWidth: 440, minHeight: 400)
