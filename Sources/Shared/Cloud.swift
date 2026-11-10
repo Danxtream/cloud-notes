@@ -267,8 +267,8 @@ final class CloudDocument {
     func uploadXML(title newTitle: String, body newBody: String, styled: [RichRun]? = nil, favorite: Bool? = nil, now: Date = Date()) throws -> Data {
         if let textIssue { throw NotesError.message(textIssue) }
         if let favorite { resource.first("attributes")?.set("isFavorite", favorite ? "true" : "false") }
-        if resource.attr("isEncrypted") == "true" || resource.attr("isLocked") == "true" {
-            throw NotesError.message("Locked or encrypted notes cannot be edited by this version.")
+        if resource.attr("isEncrypted") == "true" {
+            throw NotesError.message("Encrypted notes cannot be edited by this version.")
         }
         // Repair objects an earlier version of this client left unreadable on Samsung devices (see updateObject).
         if let object = bodyObject, let tree = resource.first("noteTree")?.first("bodyText"), Int32(object.attr("timeStamp")) == nil, !object.attr("timeStamp").isEmpty {
@@ -308,6 +308,9 @@ final class CloudDocument {
         // old time it takes the new commit id but keeps its old text ("handleSameTimeNotes" in its log), so the edit
         // never reaches the phone and a later edit there would overwrite it. Samsung stores the time as sent.
         resource.set("syncModifiedTime", millis)
+        // Samsung returns a locked note with its owner only in `attributes`, and refuses an update whose
+        // `noteResource` has no owner (400 "Request payload invalid").
+        if resource.attr("ownerId").isEmpty, let owner = resource.first("attributes")?.attr("ownerId"), !owner.isEmpty { resource.set("ownerId", owner) }
         return resource.bytes
     }
     /// Removes an object's span order data, which describes the styled runs of the text being replaced; the new text is

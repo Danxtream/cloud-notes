@@ -72,7 +72,7 @@ import Network
     }
     var editable: Bool {
         guard let doc = document else { return false }
-        return doc.resource.attr("isLocked") != "true" && doc.resource.attr("isEncrypted") != "true" && doc.textIssue == nil && folder != "trash" && !draftConflict
+        return doc.resource.attr("isEncrypted") != "true" && doc.textIssue == nil && folder != "trash" && !draftConflict
     }
     func connect(cacheOnly: Bool = false) async {
         do {
@@ -129,7 +129,7 @@ import Network
         syncing = true; defer { syncing = false }
         retryTask?.cancel()
         for (id, values) in LocalStore.unsavedDrafts() {
-            guard notes.contains(where: { $0.id == id && !$0.trashed && !$0.locked && !$0.encrypted }), !uploading.contains(id) else { continue }
+            guard notes.contains(where: { $0.id == id && !$0.trashed && !$0.encrypted }), !uploading.contains(id) else { continue }
             if id == selection { if dirty, !draftConflict { await save() }; continue }
             do {
                 let current = try await client.download(id)
@@ -271,11 +271,17 @@ import Network
             let previous = Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0.commit) })
             let index = try await client.loadIndex()
             notes = index.notes; folders = index.folders
-            let allowed = Set(notes.filter { !$0.locked && !$0.encrypted }.map(\.id))
+            let allowed = Set(notes.filter { !$0.encrypted }.map(\.id))
+            // Notes locked in Samsung Notes are readable here, so this Mac keeps its copies of them encrypted and
+            // out of reach of the command line, as it does for notes blocked in Settings.
+            let sealedIDs = BlockedNotes.ids()
+            for record in notes where record.locked && !record.encrypted && !sealedIDs.contains(record.id) {
+                try? BlockedNotes.set(record.id, title: "Locked note", blocked: true)
+            }
             loaded = loaded.filter { allowed.contains($0.key) }
             var failures = 0
             for record in notes {
-                if record.locked || record.encrypted { continue }
+                if record.encrypted { continue }
                 var doc: CloudDocument?
                 if previous[record.id] == record.commit, let existing = loaded[record.id] { doc = existing }
                 else if let cached = cache?.document(record) { doc = cached; loaded[record.id] = cached }
@@ -294,7 +300,7 @@ import Network
             }
             try cache?.prune(notes)
             try cache?.saveIndex(CloudIndex(notes: notes, folders: folders))
-            if let id = selection, !notes.contains(where: { $0.id == id && !$0.locked && !$0.encrypted }) {
+            if let id = selection, !notes.contains(where: { $0.id == id && !$0.encrypted }) {
                 selection = nil; document = nil
             }
             if selection == nil, autoSelectFirst { selection = visibleNotes.first?.id }

@@ -55,7 +55,7 @@ The Mac app reads and writes the same notes as Samsung Notes, and changes appear
 | Favorites and Trash | Read and change |
 | Handwriting and drawings | Approximate preview; not editable |
 | Images and other attachments | Open and export |
-| Locked notes | Not editable |
+| Locked notes | Read and edit; local copies encrypted and kept from the command line |
 
 ## Requirements
 

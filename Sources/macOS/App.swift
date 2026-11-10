@@ -365,7 +365,7 @@ struct NotesView: View {
         ScrollViewReader { proxy in
         List(model.visibleNotes, selection: $model.selection) { note in
             VStack(alignment: .leading, spacing: 5) {
-                HStack { Text(note.locked ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
+                HStack { Text(note.encrypted ? "Locked note" : note.title).fontWeight(.medium).lineLimit(2)
                     if note.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Favorite") }
                     if note.locked || note.encrypted { Image(systemName: "lock") }
                     if model.conflicted.contains(note.id) {

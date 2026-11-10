@@ -273,7 +273,7 @@ enum SelfTest {
         guard reopened.snapshot()?.index.notes.count == 1, reopened.document(record)?.body == "Before" else { throw NotesError.message("Cache did not survive reopening.") }
         record.commit = "revision-2"
         guard reopened.document(record) == nil else { throw NotesError.message("A stale cached revision was accepted.") }
-        record.commit = "revision-1"; record.locked = true
+        record.commit = "revision-1"; record.encrypted = true
         guard reopened.document(record) == nil else { throw NotesError.message("A locked note was restored from cache.") }
         let nativeOne = AccountSession(authorization: "Bearer synthetic-native-first", account: "Fixture", nativeID: "native:fixture:mac")
         let nativeCache = try NoteCache(session: nativeOne, base: cacheTestRoot)
